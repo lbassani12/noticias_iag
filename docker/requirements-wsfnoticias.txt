@@ -1,0 +1,9 @@
+# Dependencias Python que importa el addon institucional `wsfnoticias`
+# (deducidas de sus imports: no trae requirements.txt). Python de la imagen odoo:16.0.
+feedparser==6.0.11
+newspaper3k==0.2.8
+lxml_html_clean>=0.1          # requerido por newspaper3k con lxml >= 5
+textblob==0.17.1              # ultima version con TextBlob.translate(), que usa tools.sentimiento()
+beautifulsoup4>=4.12
+pytz
+requests
