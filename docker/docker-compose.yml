@@ -29,10 +29,27 @@ services:
       - ../../wsfnoticias:/mnt/extra-addons/wsfnoticias   # rw: escribe medio.log y telegram_norep.db en su carpeta
       - ../:/mnt/extra-addons/noticias_iag
     command: ["odoo", "--dev=reload,qweb,xml"]
-    # En el host, Ollama queda accesible como http://host.docker.internal:11434
+    # host.docker.internal apunta al host de Docker (p. ej. un Ollama instalado nativo en WSL)
+    # api.telegram.org -> loopback: wsfnoticias manda cada noticia grabada al grupo
+    # institucional con el token hardcodeado del repo base, incluso si la regla no
+    # tiene Telegram configurado (fun_enviar_telegrama usa el chat por defecto).
+    # En dev se anula la resolución del host para que el POST falle sin salir.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "api.telegram.org:127.0.0.1"
+
+  # Modelos locales para desarrollo sin costo. Desde el contenedor de Odoo: http://ollama:11434/v1
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+    restart: unless-stopped
 
 volumes:
   db-data:
   odoo-data:
+  ollama-data:
