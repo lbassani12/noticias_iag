@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <data noupdate="1">
+    <record id="template_agenda_setting" model="iag.template">
+      <field name="name">Agenda-setting de segundo nivel (por noticia)</field>
+      <field name="objetivo">Analizar cada noticia según la teoría de agenda-setting de segundo nivel (McCombs y Shaw, 1997): identificar el objeto de la agenda (tema), sus atributos sustantivos (actores, encuadre) y afectivos (tono). Alcance: una noticia por análisis. Paradigma: análisis de contenido cualitativo asistido. Referencias: McCombs y Shaw (1972, 1997); Entman (1993).</field>
+      <field name="instrucciones">Analizá la noticia suministrada como material empírico en el marco del estudio "{{estudio}}". Identificá: el tema principal (tema), eligiendo una categoría de la lista; el tono con que se presenta (tono); los actores principales mencionados (actores, hasta 5); el encuadre dominante según Entman (encuadre); un resumen de una oración (resumen); las afirmaciones fácticas centrales (afirmaciones, hasta 3), citando para cada una el fragmento textual que la sustenta; y la relevancia de la noticia para el ámbito {{ambito}} (relevancia_regional, entre 0 y 1).</field>
+      <field name="variables" eval="[
+        {'nombre': 'estudio', 'descripcion': 'Nombre o pregunta del estudio', 'default': 'agenda mediática regional'},
+        {'nombre': 'ambito', 'descripcion': 'Ámbito geográfico de referencia', 'default': 'Rosario y la provincia de Santa Fe'},
+      ]"/>
+      <field name="esquema_respuesta" eval="{
+        'type': 'object',
+        'required': ['tema', 'tono', 'actores', 'encuadre', 'resumen'],
+        'properties': {
+          'tema': {'type': 'string', 'enum': ['política', 'economía', 'seguridad', 'sociedad', 'cultura', 'deportes', 'salud', 'educación', 'ambiente', 'otro']},
+          'tono': {'type': 'string', 'enum': ['positivo', 'negativo', 'neutro']},
+          'actores': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 5},
+          'encuadre': {'type': 'string', 'enum': ['definición del problema', 'interpretación causal', 'evaluación moral', 'recomendación de tratamiento', 'ninguno']},
+          'resumen': {'type': 'string'},
+          'afirmaciones': {'type': 'array', 'maxItems': 3, 'items': {'type': 'object', 'required': ['afirmacion', 'fragmento'], 'properties': {'afirmacion': {'type': 'string'}, 'fragmento': {'type': 'string'}}}},
+          'relevancia_regional': {'type': 'number', 'minimum': 0, 'maximum': 1},
+        },
+      }"/>
+    </record>
+
+    <record id="template_resumen_agregado" model="iag.template">
+      <field name="name">Resumen agregado del corpus</field>
+      <field name="objetivo">Producir una síntesis del conjunto de noticias recuperadas: temas dominantes, actores recurrentes y tono general, para caracterizar la agenda mediática del período. Alcance: el corpus completo en un único análisis. Paradigma: agenda-setting de primer nivel (McCombs y Shaw, 1972).</field>
+      <field name="instrucciones">A partir del material empírico, identificá los temas dominantes (temas, hasta 5, con la cantidad aproximada de noticias que trata cada uno), los actores más recurrentes (actores, hasta 10), el tono general de la cobertura (tono_general) y redactá una síntesis de un párrafo (sintesis). Pregunta orientadora: {{pregunta}}.</field>
+      <field name="variables" eval="[
+        {'nombre': 'pregunta', 'descripcion': 'Pregunta orientadora del estudio', 'default': '¿Qué temas dominan la agenda mediática regional en el período?'},
+      ]"/>
+      <field name="esquema_respuesta" eval="{
+        'type': 'object',
+        'required': ['temas', 'actores', 'tono_general', 'sintesis'],
+        'properties': {
+          'temas': {'type': 'array', 'maxItems': 5, 'items': {'type': 'object', 'required': ['tema', 'cantidad'], 'properties': {'tema': {'type': 'string'}, 'cantidad': {'type': 'integer', 'minimum': 0}}}},
+          'actores': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
+          'tono_general': {'type': 'string', 'enum': ['positivo', 'negativo', 'neutro', 'mixto']},
+          'sintesis': {'type': 'string'},
+        },
+      }"/>
+    </record>
+  </data>
+</odoo>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="res_config_settings_view_form_iag" model="ir.ui.view">
+    <field name="name">res.config.settings.view.form.inherit.noticias_iag</field>
+    <field name="model">res.config.settings</field>
+    <field name="priority" eval="90"/>
+    <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+    <field name="arch" type="xml">
+      <!-- Cuidado: el cliente de Ajustes compila todos los bloques en una sola plantilla JS y pone los textos
+           dentro de literales con acentos graves. Un acento grave (`) o "${" en cualquier texto de este bloque
+           rompe la página entera de Configuración (OwlError "Failed to compile template"). -->
+      <xpath expr="//div[hasclass('settings')]" position="inside">
+        <div class="app_settings_block" data-string="Análisis IAG" string="Análisis IAG" data-key="noticias_iag">
+          <h2>Proveedor de modelos</h2>
+          <div class="row mt16 o_settings_container">
+            <div class="col-12 col-lg-6 o_setting_box">
+              <div class="o_setting_right_pane">
+                <label for="iag_proveedor"/>
+                <div class="text-muted">Configuración técnica del implementador: no es un sintonizador.</div>
+                <div class="content-group mt16">
+                  <field name="iag_proveedor" class="o_light_label"/>
+                </div>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6 o_setting_box">
+              <div class="o_setting_right_pane">
+                <span class="o_form_label">API compatible con OpenAI</span>
+                <div class="text-muted">OpenAI, Ollama (servicio ollama del compose: http://ollama:11434/v1), Groq, OpenRouter, vLLM.</div>
+                <div class="content-group mt16">
+                  <group>
+                    <field name="iag_base_url"/>
+                    <field name="iag_api_key" password="True"/>
+                    <field name="iag_modelo_generativo"/>
+                    <field name="iag_modelo_embedding"/>
+                    <field name="iag_timeout"/>
+                  </group>
+                </div>
+              </div>
+            </div>
+          </div>
+          <h2>Fragmentación y compuerta</h2>
+          <div class="row mt16 o_settings_container">
+            <div class="col-12 col-lg-6 o_setting_box">
+              <div class="o_setting_right_pane">
+                <div class="content-group">
+                  <group>
+                    <field name="iag_max_chars_embedding"/>
+                    <field name="iag_max_chars_noticia"/>
+                    <field name="iag_salida_estructurada"/>
+                    <field name="iag_politica_no_conformidad"/>
+                  </group>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </xpath>
+    </field>
+  </record>
+
+  <record id="action_iag_settings" model="ir.actions.act_window">
+    <field name="name">Configuración de Análisis IAG</field>
+    <field name="res_model">res.config.settings</field>
+    <field name="view_mode">form</field>
+    <field name="target">inline</field>
+    <field name="context">{'module': 'noticias_iag', 'bin_size': False}</field>
+  </record>
+</odoo>

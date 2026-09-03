@@ -1,0 +1,439 @@
+# -*- coding: utf-8 -*-
+"""Fase 2 del plan: el pipeline completo con el proveedor simulado.
+
+Verifica cardinalidades N→N→M→M→M′→M′→1, la cadena de procedencia, la compuerta de
+Decodificación, el ejecutor humano, la monotonía y la política de Normalización.
+"""
+from datetime import datetime, timedelta
+
+from odoo.exceptions import UserError, ValidationError
+from odoo.tests import TransactionCase, tagged
+from odoo.tools import mute_logger
+
+from ..models.estudio import ETAPAS
+from ..services import esquema as esq
+
+TITULOS = [
+    'El intendente anunció obras en la zona sur de Rosario',
+    'Aumentó el boleto de colectivo en Rosario',
+    'Detuvieron a tres personas por narcomenudeo en Santa Fe',
+    'Rosario Central ganó el clásico',
+    'Lanzan un programa de becas para estudiantes secundarios',
+    'Alerta por crecida del río Paraná',
+]
+
+
+@tagged('post_install', '-at_install', 'noticias_iag')
+class TestPipeline(TransactionCase):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.env['ir.config_parameter'].sudo().set_param('noticias_iag.proveedor', 'fake')
+        Partner = cls.env['res.partner']
+        cls.medio_a = Partner.create({'name': 'Portal A (test)'})
+        cls.medio_b = Partner.create({'name': 'Portal B (test)'})
+        ahora = datetime.now()
+        vals = []
+        for i, titulo in enumerate(TITULOS):
+            medio = cls.medio_a if i % 2 == 0 else cls.medio_b
+            vals.append({
+                'titulo': titulo, 'copete': 'Copete %d' % i, 'texto': ('%s. ' % titulo) * 5,
+                'link': 'https://test.local/noticia/%d' % i, 'medio': medio.id,
+                'departamento': 'Rosario' if medio == cls.medio_a else 'La Capital',
+                'fecha_hora': ahora - timedelta(days=i), 'fecha_registro': ahora - timedelta(hours=i),
+                'regla2': 'test',
+            })
+        cls.regla_test = cls.env['wsf_noticias_reglas'].create({'nombre_regla': 'test', 'estado': 'on'})
+        cls.regla_otra = cls.env['wsf_noticias_reglas'].create({'nombre_regla': 'otra-regla', 'estado': 'on'})
+        cls.regla_tes = cls.env['wsf_noticias_reglas'].create({'nombre_regla': 'tes', 'estado': 'on'})
+        cls.noticias = cls.env['wsf_noticias_resultados'].create(vals)
+        cls.N = len(cls.noticias)
+        cls.template = cls.env.ref('noticias_iag.template_agenda_setting')
+
+    def _estudio(self, **extra):
+        vals = {'name': 'Estudio de prueba', 'medio_ids': [(6, 0, (self.medio_a | self.medio_b).ids)],
+                'template_id': self.template.id, 'estrategia': 'por_noticia', 'ejecutor': 'llm_judge'}
+        vals.update(extra)
+        return self.env['iag.estudio'].create(vals)
+
+    # --- Fase 1: contratos --------------------------------------------------------------------
+    def test_01_template_rechaza_esquemas_invalidos(self):
+        Template = self.env['iag.template']
+        with self.assertRaises(ValidationError):
+            Template.create({'name': 'inválido', 'objetivo': 'x', 'instrucciones': 'x',
+                             'esquema_respuesta': {'type': 'object', 'properties': {'a': {'type': 'foo'}}}})
+        with self.assertRaises(ValidationError):
+            Template.create({'name': 'inválido 2', 'objetivo': 'x', 'instrucciones': 'x',
+                             'esquema_texto': '{no es json'})
+        with self.assertRaises(ValidationError):
+            Template.create({'name': 'inválido 3', 'objetivo': 'x', 'instrucciones': 'x',
+                             'esquema_respuesta': {'type': 'object', 'required': ['b'], 'properties': {'a': {'type': 'string'}}}})
+        valido = Template.create({'name': 'válido', 'objetivo': 'x', 'instrucciones': 'Analizá {{tema}}',
+                                  'esquema_texto': '{"type": "object", "required": ["r"], "properties": {"r": {"type": "string"}}}'})
+        self.assertEqual(valido.esquema_respuesta['required'], ['r'])
+        with self.assertRaises(UserError):
+            valido.renderizar_instrucciones({})
+        self.assertEqual(valido.renderizar_instrucciones({'tema': 'seguridad'}), 'Analizá seguridad')
+
+    def test_02_validador_de_esquema(self):
+        esquema = {'type': 'object', 'required': ['tono', 'n'], 'properties': {
+            'tono': {'type': 'string', 'enum': ['Positivo', 'Negativo']},
+            'n': {'type': 'number', 'minimum': 0, 'maximum': 1},
+            'ok': {'type': 'boolean'}}}
+        canon, errores = esq.canonicalizar({'tono': ' positivo ', 'n': '0,5', 'ok': 'sí'}, esquema)
+        self.assertEqual(errores, [])
+        self.assertEqual(canon, {'tono': 'Positivo', 'n': 0.5, 'ok': True})
+        _canon, errores = esq.canonicalizar({'tono': 'neutro', 'n': 3}, esquema)
+        self.assertEqual(len(errores), 2)
+        obj, error = esq.aislar_json('Claro:\n```json\n{"a": 1}\n```\nListo.')
+        self.assertIsNone(error)
+        self.assertEqual(obj, {'a': 1})
+        self.assertIsNotNone(esq.aislar_json('sin json')[1])
+
+    # --- Fase 2: pipeline --------------------------------------------------------------------
+    def test_03_cardinalidades_por_noticia(self):
+        est = self._estudio()
+        est.action_ejecutar_todo()
+        self.assertEqual(est.state, 'consolidado')
+        for tubo in ('noticia_ids', 'embedding_ids', 'prompt_ids', 'respuesta_ids', 'analisis_ids', 'veredicto_ids'):
+            self.assertEqual(len(est[tubo]), self.N, tubo)
+        self.assertTrue(est.resultado_id)
+        self.assertEqual(est.descartados_decodificacion, 0)
+        self.assertTrue(all(len(p.noticia_ids) == 1 for p in est.prompt_ids))
+        # el juez generativo también deja su sustento como filas y como Json
+        v = est.veredicto_ids[0]
+        self.assertTrue(v.sustento_ids)
+        self.assertEqual(len(v.sustento), len(v.sustento_ids))
+        self.assertIn(v.sustento_ids[0].relacion, ('respalda', 'contradice', 'sin_evidencia'))
+        requeridas = set(self.template.esquema_respuesta['required'])
+        for a in est.analisis_ids:
+            self.assertTrue(requeridas <= set(a.contenido), a.contenido)
+        self.assertEqual(set(est.resultado_id.veredicto_ids.ids), set(est.veredicto_ids.ids))
+        self.assertEqual(est.config_tecnica_snapshot['proveedor'], 'fake')
+        self.assertNotIn('api_key', est.config_tecnica_snapshot)
+        self.assertEqual(set(est.tiempos), {e[1] for e in ETAPAS})
+
+    def test_04_estrategia_agregado(self):
+        est = self._estudio(estrategia='agregado', template_id=self.env.ref('noticias_iag.template_resumen_agregado').id)
+        est.action_ejecutar_todo()
+        self.assertEqual(est.state, 'consolidado')
+        self.assertEqual(len(est.embedding_ids), self.N)
+        self.assertEqual(len(est.prompt_ids), 1)
+        self.assertEqual(set(est.prompt_ids.noticia_ids.ids), set(self.noticias.ids))
+        self.assertEqual(len(est.analisis_ids), 1)
+        self.assertIn('temas', est.analisis_ids.contenido)
+
+    def test_05_recuperacion_top_k(self):
+        est = self._estudio(top_k=2)
+        est.action_ejecutar_todo()
+        self.assertEqual(len(est.embedding_ids), self.N)
+        self.assertEqual(len(est.prompt_ids), 2)
+        self.assertEqual(len(est.informe['composicion']['similitudes']), 2)
+
+    def test_06_procedencia_resultado_a_noticia(self):
+        est = self._estudio()
+        est.action_ejecutar_todo()
+        res = est.resultado_id
+        cadena = res.veredicto_ids.mapped('analisis_id.respuesta_id.prompt_id')
+        self.assertEqual(set(cadena.mapped('noticia_ids').ids), set(self.noticias.ids))
+        self.assertEqual(cadena.mapped('template_id'), self.template)
+        for v in res.veredicto_ids:
+            self.assertEqual(v.analisis_id.respuesta_id.prompt_id.template_id, self.template)
+            self.assertEqual(len(v.analisis_id.noticia_ids), 1)
+
+    def test_07_compuerta_decodificacion(self):
+        est = self._estudio().with_context(iag_fake_basura_si_contiene='Rosario Central')
+        est.action_ejecutar_todo()
+        self.assertEqual(len(est.respuesta_ids), self.N)
+        self.assertEqual(len(est.analisis_ids), self.N - 1)
+        self.assertEqual(est.descartados_decodificacion, 1)
+        self.assertEqual(len(est.veredicto_ids), self.N - 1)
+        descartes = est.informe['decodificacion']['descartes']
+        self.assertEqual(len(descartes), 1)
+        respuesta = self.env['iag.respuesta'].browse(descartes[0]['respuesta_id'])
+        self.assertIn('Rosario Central', respuesta.prompt_id.texto)
+        self.assertEqual(est.state, 'consolidado')
+        self.assertEqual(est.resultado_id.contenido['resumen']['m_analisis'], self.N - 1)
+
+    def test_08_ejecutor_humano(self):
+        est = self._estudio(ejecutor='humano')
+        est.action_ejecutar_todo()
+        self.assertEqual(est.state, 'en_verificacion')
+        self.assertEqual(len(est.veredicto_ids), 0)
+        self.assertEqual(est.analisis_pendientes, self.N)
+        with self.assertRaises(UserError):
+            est.action_continuar_verificacion()
+        for i, a in enumerate(est.analisis_ids):
+            if i == 0:
+                self.env['iag.veredicto'].create({
+                    'analisis_id': a.id, 'estado': 'valido', 'confianza': 0.9,
+                    'sustento_ids': [(0, 0, {'afirmacion': 'x', 'relacion': 'respalda', 'fragmento': 'x'})]})
+            else:
+                self.env['iag.veredicto'].create({
+                    'analisis_id': a.id, 'estado': 'valido', 'confianza': 0.9,
+                    'sustento_texto': '[{"afirmacion": "x", "relacion": "respalda", "fragmento": "x"}]'})
+        self.assertEqual(est.analisis_pendientes, 0)
+        est.action_continuar_verificacion()
+        self.assertEqual(est.state, 'verificado')
+        self.assertEqual(len(est.veredicto_ids), self.N)
+        v = est.veredicto_ids[0]
+        self.assertEqual(v.sustento[0]['relacion'], 'respalda')          # Json del contrato, computado de las filas
+        self.assertEqual(v.sustento_ids.mapped('afirmacion'), ['x'])
+        self.assertEqual(v.estudio_id, est)
+        self.assertEqual(v.criterio_validez, est.criterio_validez)       # el revisor ve el criterio del estudio
+        with self.assertRaises(UserError):
+            v.sustento_ids.unlink()
+        est.action_ejecutar_siguiente()
+        self.assertEqual(est.state, 'consolidado')
+        self.assertEqual(est.resultado_id.contenido['resumen']['veredictos_por_estado'], {'valido': self.N})
+
+    def test_09_monotonia_del_repositorio(self):
+        est = self._estudio()
+        est.action_ejecutar_todo()
+        with self.assertRaises(UserError):
+            est.embedding_ids[0].unlink()
+        with self.assertRaises(UserError):
+            est.resultado_id.unlink()
+        with self.assertRaises(Exception), mute_logger('odoo.sql_db'), self.cr.savepoint():
+            self.noticias[0].unlink()
+        with self.assertRaises(Exception), mute_logger('odoo.sql_db'), self.cr.savepoint():
+            self.template.unlink()
+
+    def test_10_normalizacion_politica(self):
+        est = self._estudio(politica_observados='solo_validos', agrupar_por='medio')
+        est.action_ejecutar_todo()
+        validos = est.veredicto_ids.filtered(lambda v: v.estado == 'valido')
+        contenido = est.resultado_id.contenido
+        self.assertEqual(contenido['resumen']['incluidos'], len(validos))
+        self.assertEqual(contenido['resumen']['m_veredictos'], self.N)
+        self.assertEqual(len(est.resultado_id.veredicto_ids), self.N)
+        self.assertIn('tema', contenido['politica_aplicada']['claves_comparacion'])
+        if validos:
+            self.assertEqual(sum(contenido['distribuciones']['tono'].values()), len(validos))
+            self.assertTrue(set(contenido['por_grupo']) <= {'Portal A (test)', 'Portal B (test)'})
+        self.assertIn('<h3>', est.resultado_id.html)
+
+    def test_11_nueva_iteracion(self):
+        est = self._estudio()
+        est.action_ejecutar_todo()
+        accion = est.action_nueva_iteracion()
+        nuevo = self.env['iag.estudio'].browse(accion['res_id'])
+        self.assertEqual(nuevo.state, 'borrador')
+        self.assertEqual(nuevo.iteracion_de_id, est)
+        self.assertEqual(nuevo.template_id, est.template_id)
+        self.assertEqual(set(nuevo.medio_ids.ids), set(est.medio_ids.ids))
+        self.assertEqual(nuevo.variable_ids.mapped('nombre'), est.variable_ids.mapped('nombre'))
+        self.assertFalse(nuevo.noticia_ids)
+        self.assertFalse(nuevo.resultado_id)
+        nuevo.action_ejecutar_todo()
+        self.assertEqual(nuevo.state, 'consolidado')
+        self.assertNotEqual(nuevo.resultado_id, est.resultado_id)
+
+    # --- Mitigación de respuestas truncadas ---------------------------------------------------
+    TRUNCADO = ('```json\n{"tema": "política", "tono": "neutro", "actores": ["A"], "encuadre": "ninguno", '
+                '"resumen": "x", "afirmaciones": [{"afirmacion": "a", "fragmento": "b"')
+
+    def test_12_reparar_json_truncado(self):
+        obj, desc = esq.reparar_json(self.TRUNCADO)
+        self.assertEqual(obj['afirmaciones'], [{'afirmacion': 'a', 'fragmento': 'b'}])
+        self.assertIn("se agregó", desc)
+        # sin la llave final (el caso observado con qwen2.5:3b)
+        obj, _d = esq.reparar_json('{"a": 1, "b": [1, 2]\n')
+        self.assertEqual(obj, {'a': 1, 'b': [1, 2]})
+        # string y clave cortadas: se quita el miembro incompleto
+        obj, desc = esq.reparar_json('{"a": 1, "b": "texto cor')
+        self.assertEqual(obj, {'a': 1})
+        self.assertIn('incompleto', desc)
+        obj, desc = esq.reparar_json('{"a": [1, 2], "afirm')
+        self.assertEqual(obj, {'a': [1, 2]})
+        # número cortado y coma colgante
+        self.assertEqual(esq.reparar_json('{"a": 1, "n": 0.')[0], {'a': 1})
+        self.assertEqual(esq.reparar_json('[1, 2,')[0], [1, 2])
+        self.assertEqual(esq.reparar_json('sin json'), (None, None))
+        # lo que ya es válido no se toca por la vía normal
+        self.assertIsNone(esq.aislar_json('{"a": 1}')[1])
+
+    def _hasta(self, est, estado):
+        while est.state != estado:
+            est.action_ejecutar_siguiente()
+
+    def test_13_politica_reparar_vs_descartar(self):
+        icp = self.env['ir.config_parameter'].sudo()
+        icp.set_param('noticias_iag.politica_no_conformidad', 'reparar')
+        est = self._estudio().with_context(iag_fake_respuesta=self.TRUNCADO)
+        self._hasta(est, 'decodificado')
+        self.assertEqual(len(est.analisis_ids), self.N)
+        self.assertEqual(est.descartados_decodificacion, 0)
+        self.assertEqual(len(est.informe['decodificacion']['reparados']), self.N)
+        self.assertEqual(est.analisis_ids[0].contenido['tema'], 'política')
+        icp.set_param('noticias_iag.politica_no_conformidad', 'descartar')
+        est2 = self._estudio().with_context(iag_fake_respuesta=self.TRUNCADO)
+        self._hasta(est2, 'decodificado')
+        self.assertEqual(len(est2.analisis_ids), 0)
+        self.assertEqual(est2.descartados_decodificacion, self.N)
+        self.assertEqual(est2.informe['decodificacion']['politica'], 'descartar')
+
+    def test_14_reparacion_no_salva_lo_no_conforme(self):
+        self.env['ir.config_parameter'].sudo().set_param('noticias_iag.politica_no_conformidad', 'reparar')
+        truncado_invalido = '{"tema": "política", "tono": "neutro", "actores": ["A"], "encuadre": "ninguno"'  # falta resumen
+        est = self._estudio().with_context(iag_fake_respuesta=truncado_invalido)
+        self._hasta(est, 'decodificado')
+        self.assertEqual(len(est.analisis_ids), 0)
+        descartes = est.informe['decodificacion']['descartes']
+        self.assertEqual(len(descartes), self.N)
+        self.assertIn('reparado', descartes[0]['motivo'])
+        self.assertIn('resumen', descartes[0]['motivo'])
+
+    def test_15_previsualizacion_del_template(self):
+        prev = self.template.previsualizacion
+        self.assertIn('# Objetivo del análisis', prev)
+        self.assertIn(self.template.objetivo[:40], prev)
+        self.assertIn('agenda mediática regional', prev)          # variable {{estudio}} con su default
+        self.assertNotIn('{{', prev)
+        self.assertIn('# Material empírico', prev)
+        self.assertIn('[Aquí Composición de contexto inserta', prev)
+        self.assertIn('### Esquema de respuesta (JSON Schema)', prev)
+        self.assertIn('"relevancia_regional"', prev)
+        # el prompt real de Composición comparte encabezado y formato con la previsualización
+        est = self._estudio(limite=1)
+        self._hasta(est, 'compuesto')
+        texto = est.prompt_ids.texto
+        cabecera = prev.split('# Material empírico')[0]
+        self.assertTrue(texto.startswith(cabecera))
+        self.assertEqual(texto.split('### Esquema de respuesta')[1], prev.split('### Esquema de respuesta')[1])
+        self.assertNotIn('[Aquí Composición', texto)
+        self.assertIn(est.noticia_ids.titulo, texto)
+
+    def test_16_variables_del_template_en_el_estudio(self):
+        est = self._estudio()
+        # al crear con template, las filas nacen de la declaración del template, sin valor asignado
+        self.assertEqual(est.variable_ids.mapped('nombre'), ['estudio', 'ambito'])
+        self.assertEqual(est.variable_ids[0].valor_default, 'agenda mediática regional')
+        self.assertFalse(est.variable_ids[0].valor)
+        self.assertEqual(est._valores_variables(), {})
+        # el experto asigna un valor; el otro queda en su default
+        est.variable_ids.filtered(lambda l: l.nombre == 'estudio').valor = 'elecciones 2027'
+        self.assertEqual(est._valores_variables(), {'estudio': 'elecciones 2027'})
+        self._hasta(est, 'compuesto')
+        texto = est.prompt_ids[0].texto
+        self.assertIn('"elecciones 2027"', texto)
+        self.assertIn('Rosario y la provincia de Santa Fe', texto)
+        # cambiar de template reconstruye las filas conservando por nombre lo asignado
+        otro = self.env['iag.template'].create({
+            'name': 'otro', 'objetivo': 'x', 'instrucciones': 'Estudio {{estudio}} sobre {{tema}}',
+            'variables': [{'nombre': 'estudio', 'default': 'e'}, {'nombre': 'tema', 'default': 't'}],
+            'esquema_respuesta': {'type': 'object', 'required': ['r'], 'properties': {'r': {'type': 'string'}}}})
+        est2 = self._estudio()
+        est2.variable_ids.filtered(lambda l: l.nombre == 'estudio').valor = 'conservado'
+        est2.write({'template_id': otro.id})
+        self.assertEqual(est2.variable_ids.mapped('nombre'), ['estudio', 'tema'])
+        self.assertEqual(est2._valores_variables(), {'estudio': 'conservado'})
+        # compatibilidad: valores_variables en create() se vuelca a las filas
+        est3 = self._estudio(valores_variables={'ambito': 'Santa Fe capital'})
+        self.assertEqual(est3._valores_variables(), {'ambito': 'Santa Fe capital'})
+
+    def test_17_vista_previa_y_curacion_del_corpus(self):
+        Estudio = self.env['iag.estudio']
+        # vista previa: Buscar llena la tabla con lo que cumple los criterios
+        est = Estudio.new({'name': 'preview', 'medio_ids': [(6, 0, [self.medio_a.id])], 'template_id': self.template.id})
+        est.action_buscar_corpus()
+        self.assertEqual(set(est.noticia_ids.ids), set(self.noticias.filtered(lambda n: n.medio == self.medio_a).ids))
+        est.medio_ids = self.medio_a | self.medio_b
+        est.action_buscar_corpus()
+        self.assertEqual(len(est.noticia_ids), self.N)
+        self.assertEqual(est.n_candidatas, self.N)
+        self.assertIn('Vista previa', est.corpus_estado)
+        # curación a mano: el experto quita una; al confirmar, queda registrada como excluida
+        est = self._estudio()
+        self.assertIn('Buscá', est.corpus_estado)
+        est.action_buscar_corpus()
+        quitada = est.noticia_ids[0]
+        est.noticia_ids = [(3, quitada.id, 0)]
+        est.action_seleccionar_corpus()
+        self.assertEqual(est.state, 'corpus')
+        self.assertEqual(len(est.noticia_ids), self.N - 1)
+        self.assertEqual(est.noticia_excluida_ids, quitada)
+        self.assertTrue(est.fecha_corpus)
+        self.assertIn('Corpus confirmado', est.corpus_estado)
+        est.action_ejecutar_todo()
+        self.assertEqual(len(est.veredicto_ids), self.N - 1)
+        self.assertNotIn(quitada, est.prompt_ids.mapped('noticia_ids'))
+        # volver a borrador desvincula todo y rehace la vista previa
+        est.action_volver_a_borrador()
+        self.assertEqual(est.state, 'borrador')
+        self.assertFalse(est.noticia_excluida_ids)
+        self.assertEqual(len(est.noticia_ids), self.N)
+        # límite: la vista previa y el corpus respetan el tope
+        est2 = self._estudio(limite=2)
+        est2.action_buscar_corpus()
+        self.assertEqual(len(est2.noticia_ids), 2)
+        est2.action_seleccionar_corpus()
+        self.assertEqual(len(est2.noticia_ids), 2)
+        self.assertFalse(est2.noticia_excluida_ids)
+
+    def test_18_filtro_por_regla_de_extraccion(self):
+        est = self._estudio(regla_ids=[(6, 0, [self.regla_test.id])])
+        est.action_buscar_corpus()
+        self.assertEqual(len(est.noticia_ids), self.N)
+        # una regla que ninguna noticia lista no trae nada
+        est.write({'regla_ids': [(6, 0, [self.regla_otra.id])]})
+        est.action_buscar_corpus()
+        self.assertEqual(len(est.noticia_ids), 0)
+        # coincidencia exacta por nombre: 'tes' no se lleva a 'test'
+        est.write({'regla_ids': [(6, 0, [self.regla_tes.id])]})
+        est.action_buscar_corpus()
+        self.assertEqual(len(est.noticia_ids), 0)
+        self.assertEqual(est.n_candidatas, 0)
+        # varias reglas: alcanza con una
+        est.write({'regla_ids': [(6, 0, [self.regla_tes.id, self.regla_test.id])]})
+        est.action_buscar_corpus()
+        self.assertEqual(len(est.noticia_ids), self.N)
+
+    def test_19_formulario_del_revisor(self):
+        est = self._estudio(ejecutor='humano')
+        est.action_ejecutar_todo()
+        Veredicto = self.env['iag.veredicto']
+        a = est.analisis_ids[0]
+        # el formulario abre con el sustento precargado desde las afirmaciones del análisis, sin relación decidida
+        defaults = Veredicto.with_context(default_analisis_id=a.id).default_get(['analisis_id', 'sustento_ids'])
+        self.assertEqual(defaults['analisis_id'], a.id)
+        filas = [c[2] for c in defaults['sustento_ids']]
+        self.assertEqual(len(filas), len(a.contenido['afirmaciones']))
+        self.assertEqual(filas[0]['afirmacion'], a.contenido['afirmaciones'][0]['afirmacion'])
+        self.assertEqual(filas[0]['link'], a.noticia_ids.link)
+        self.assertNotIn('relacion', filas[0])
+        # emitir lleva al siguiente pendiente; el último vuelve al estudio
+        for i, an in enumerate(est.analisis_ids):
+            v = Veredicto.create({'analisis_id': an.id, 'estado': 'valido', 'confianza': 1.0,
+                                  'sustento_ids': [(0, 0, {'afirmacion': 'a', 'relacion': 'respalda'})]})
+            accion = v.action_emitir()
+            if i < self.N - 1:
+                self.assertEqual(accion['res_model'], 'iag.veredicto')
+                self.assertIn(accion['context']['default_analisis_id'], est._analisis_pendientes().ids)
+            else:
+                self.assertEqual(accion['res_model'], 'iag.estudio')
+                self.assertEqual(accion['res_id'], est.id)
+        self.assertEqual(est.analisis_pendientes, 0)
+
+    def test_20_claves_a_consolidar_como_filas(self):
+        est = self._estudio()
+        # filas desde el esquema del template; por defecto se tildan opciones cerradas y numéricas
+        self.assertEqual(est.clave_ids.mapped('nombre'), list(self.template.esquema_respuesta['properties']))
+        tildadas = est.clave_ids.filtered('consolidar').mapped('nombre')
+        self.assertEqual(set(tildadas), {'tema', 'tono', 'encuadre', 'relevancia_regional'})
+        self.assertIn('opciones:', est.clave_ids.filtered(lambda c: c.nombre == 'tema').tipo)
+        self.assertEqual(est.clave_ids.filtered(lambda c: c.nombre == 'relevancia_regional').tipo, 'número')
+        # destildar una clave la saca del Resultado; tildar una lista la mete
+        est.clave_ids.filtered(lambda c: c.nombre == 'tono').consolidar = False
+        est.clave_ids.filtered(lambda c: c.nombre == 'actores').consolidar = True
+        est.action_ejecutar_todo()
+        contenido = est.resultado_id.contenido
+        self.assertEqual(set(contenido['politica_aplicada']['claves_comparacion']), {'tema', 'encuadre', 'relevancia_regional', 'actores'})
+        self.assertIn('tema', contenido['distribuciones'])
+        self.assertNotIn('tono', contenido['distribuciones'])
+        self.assertIn('actores', contenido['distribuciones'])
+        self.assertIn('relevancia_regional', contenido['numericas'])
+        # la iteración copia las filas con sus tildes
+        nuevo = self.env['iag.estudio'].browse(est.action_nueva_iteracion()['res_id'])
+        self.assertEqual(nuevo.clave_ids.filtered('consolidar').mapped('nombre'), est.clave_ids.filtered('consolidar').mapped('nombre'))

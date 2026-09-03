@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_iag_estudio_tree" model="ir.ui.view">
+    <field name="name">iag.estudio.tree</field>
+    <field name="model">iag.estudio</field>
+    <field name="arch" type="xml">
+      <tree>
+        <field name="name"/>
+        <field name="template_id"/>
+        <field name="estrategia"/>
+        <field name="ejecutor"/>
+        <field name="n_noticias" string="N"/>
+        <field name="m_prompts" string="M"/>
+        <field name="m_analisis" string="M′ análisis"/>
+        <field name="m_veredictos" string="M′ veredictos"/>
+        <field name="state" widget="badge" decoration-success="state == 'consolidado'" decoration-warning="state == 'en_verificacion'" decoration-info="state not in ('consolidado', 'en_verificacion', 'borrador')"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_iag_estudio_form" model="ir.ui.view">
+    <field name="name">iag.estudio.form</field>
+    <field name="model">iag.estudio</field>
+    <field name="arch" type="xml">
+      <form string="Estudio">
+        <header>
+          <button name="action_ejecutar_siguiente" string="Ejecutar siguiente filtro" type="object" class="btn-primary" states="corpus,enriquecido,compuesto,invocado,decodificado,verificado"/>
+          <button name="action_ejecutar_todo" string="Ejecutar todo" type="object" states="borrador,corpus,enriquecido,compuesto,invocado,decodificado,verificado" confirm="Si el corpus no está confirmado, se confirma con lo que muestra la vista previa. ¿Ejecutar todos los filtros?"/>
+          <button name="action_continuar_verificacion" string="Continuar (veredictos emitidos)" type="object" class="btn-primary" states="en_verificacion"/>
+          <button name="action_nueva_iteracion" string="Nueva iteración" type="object" states="en_verificacion,verificado,consolidado"/>
+          <button name="action_volver_a_borrador" string="Volver a borrador" type="object" attrs="{'invisible': [('state', '=', 'borrador')]}" confirm="Se desvinculan los recordsets de esta corrida; los registros permanecen en el repositorio. ¿Continuar?"/>
+          <field name="state" widget="statusbar" statusbar_visible="borrador,corpus,enriquecido,compuesto,invocado,decodificado,verificado,consolidado"/>
+        </header>
+        <sheet>
+          <div class="oe_button_box" name="button_box">
+            <button name="action_ver_noticias" type="object" class="oe_stat_button" icon="fa-newspaper-o">
+              <field name="n_noticias" widget="statinfo" string="Noticias"/>
+            </button>
+            <button name="action_ver_embeddings" type="object" class="oe_stat_button" icon="fa-cubes">
+              <field name="n_embeddings" widget="statinfo" string="Embeddings"/>
+            </button>
+            <button name="action_ver_prompts" type="object" class="oe_stat_button" icon="fa-file-text-o">
+              <field name="m_prompts" widget="statinfo" string="Prompts"/>
+            </button>
+            <button name="action_ver_respuestas" type="object" class="oe_stat_button" icon="fa-comment-o">
+              <field name="m_respuestas" widget="statinfo" string="Respuestas"/>
+            </button>
+            <button name="action_ver_analisis" type="object" class="oe_stat_button" icon="fa-list-alt">
+              <field name="m_analisis" widget="statinfo" string="Análisis"/>
+            </button>
+            <button name="action_ver_analisis_pendientes" type="object" class="oe_stat_button" icon="fa-hourglass-half" states="en_verificacion">
+              <field name="analisis_pendientes" widget="statinfo" string="Sin veredicto"/>
+            </button>
+            <button name="action_ver_veredictos" type="object" class="oe_stat_button" icon="fa-check-square-o">
+              <field name="m_veredictos" widget="statinfo" string="Veredictos"/>
+            </button>
+            <button name="action_ver_resultado" type="object" class="oe_stat_button" icon="fa-bar-chart" attrs="{'invisible': [('resultado_id', '=', False)]}">
+              <div class="o_stat_info"><span class="o_stat_text">Resultado</span></div>
+            </button>
+          </div>
+          <div class="oe_title">
+            <h1><field name="name" placeholder="Nombre del estudio"/></h1>
+          </div>
+          <group>
+            <group>
+              <field name="template_id" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+              <field name="iteracion_de_id" attrs="{'invisible': [('iteracion_de_id', '=', False)]}"/>
+            </group>
+            <group>
+              <field name="descartados_decodificacion"/>
+              <field name="resultado_id" invisible="1"/>
+            </group>
+          </group>
+          <notebook>
+            <page string="Corpus" name="corpus">
+              <p class="text-muted">La Extracción la hace <code>wsfnoticias</code> de manera continua. Acá se elige qué parte de lo ya extraído entra a este estudio: los criterios arman una vista previa, podés quitar o agregar noticias a mano, y al confirmar el corpus queda congelado como el recordset de entrada del pipeline.</p>
+              <group string="Criterios de selección">
+                <group>
+                  <field name="campo_fecha" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                  <field name="fecha_desde" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                  <field name="fecha_hasta" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                  <field name="limite" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                </group>
+                <group>
+                  <field name="medio_ids" widget="many2many_tags" options="{'no_create': True}" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                  <field name="regla_ids" widget="many2many_tags" options="{'no_create': True}" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                  <field name="excluir_archivadas" attrs="{'readonly': [('state', '!=', 'borrador')]}"/>
+                </group>
+              </group>
+              <div class="d-flex align-items-center gap-3 mb-2">
+                <button name="action_buscar_corpus" string="Buscar" type="object" class="btn btn-secondary" states="borrador" help="Llena la tabla con las noticias que cumplen los criterios. Volver a buscar la rehace."/>
+                <button name="action_ver_excluidas" string="Ver excluidas a mano" type="object" class="btn btn-link" attrs="{'invisible': ['|', ('state', '=', 'borrador'), ('n_excluidas', '=', 0)]}"/>
+                <field name="n_excluidas" invisible="1"/>
+                <field name="corpus_estado" nolabel="1" readonly="1" class="fst-italic"/>
+              </div>
+              <field name="noticia_ids" attrs="{'readonly': [('state', '!=', 'borrador')]}">
+                <tree create="0" delete="1">
+                  <field name="fecha_registro" string="Registrada"/>
+                  <field name="fecha_hora" string="Publicada" optional="show"/>
+                  <field name="medio"/>
+                  <field name="titulo"/>
+                  <field name="regla2" string="Reglas aplicadas"/>
+                  <field name="valorar" optional="hide"/>
+                </tree>
+              </field>
+              <div class="d-flex justify-content-end mt-3">
+                <button name="action_seleccionar_corpus" string="Confirmar corpus" type="object" class="btn btn-primary" states="borrador" help="Congela lo que está en la tabla como el corpus del estudio."/>
+              </div>
+            </page>
+            <page string="Composición" name="composicion">
+              <p class="text-muted">Recuperación aumentada (RAG): las noticias del corpus se ordenan por similitud con la consulta y las recuperadas se ensamblan en uno o varios prompts con el template elegido.</p>
+              <group>
+                <group string="Recuperación">
+                  <field name="estrategia" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+                  <field name="top_k" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+                  <field name="umbral_similitud" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+                </group>
+                <group string="Modelo generativo">
+                  <field name="temperatura" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+                  <field name="longitud_salida" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+                </group>
+              </group>
+              <separator string="Variables de contexto declaradas por el template"/>
+              <p class="text-muted">Una fila por variable del template. Dejá el valor vacío para usar el valor por defecto.</p>
+              <field name="variable_ids" nolabel="1" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}">
+                <tree editable="bottom" create="0" delete="0">
+                  <!-- force_save: el cliente web no envía los campos readonly al guardar; sin esto las filas
+                       que vienen del onchange del template llegan sin nombre y viola el NOT NULL. -->
+                  <field name="sequence" invisible="1" force_save="1"/>
+                  <field name="nombre" force_save="1"/>
+                  <field name="descripcion" force_save="1"/>
+                  <field name="valor_default" force_save="1"/>
+                  <field name="valor" placeholder="(vacío = valor por defecto)"/>
+                  <field name="valor_efectivo" optional="hide"/>
+                </tree>
+              </field>
+              <group>
+                <field name="texto_libre" attrs="{'readonly': [('state', 'in', ['compuesto', 'invocado', 'decodificado', 'en_verificacion', 'verificado', 'consolidado'])]}"/>
+              </group>
+            </page>
+            <page string="Verificación" name="verificacion">
+              <group>
+                <field name="ejecutor" attrs="{'readonly': [('state', 'in', ['en_verificacion', 'verificado', 'consolidado'])]}"/>
+                <field name="criterio_validez" attrs="{'readonly': [('state', 'in', ['en_verificacion', 'verificado', 'consolidado'])]}"/>
+              </group>
+            </page>
+            <page string="Normalización" name="normalizacion">
+              <group>
+                <field name="politica_observados" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                <field name="agrupar_por" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+              </group>
+              <separator string="Claves del esquema a consolidar"/>
+              <p class="text-muted">Una fila por clave del esquema de respuesta del template. Las tildadas se tabulan en el Resultado: las de opciones cerradas y sí/no como distribuciones, las numéricas con mínimo, media y máximo, y todas cruzadas por la agrupación elegida. Los textos libres y las listas no se tildan por defecto porque cada valor sería único.</p>
+              <field name="clave_ids" nolabel="1" attrs="{'readonly': [('state', '=', 'consolidado')]}">
+                <tree editable="bottom" create="0" delete="0">
+                  <field name="sequence" invisible="1" force_save="1"/>
+                  <field name="nombre" force_save="1"/>
+                  <field name="tipo" force_save="1"/>
+                  <field name="consolidar" widget="boolean_toggle"/>
+                </tree>
+              </field>
+            </page>
+            <page string="Resultado" name="resultado" attrs="{'invisible': [('resultado_id', '=', False)]}">
+              <field name="resultado_html" nolabel="1" readonly="1"/>
+            </page>
+            <page string="Corrida" name="corrida">
+              <group>
+                <field name="config_tecnica_texto" style="font-family: monospace"/>
+                <field name="tiempos_texto" style="font-family: monospace"/>
+                <field name="informe_texto" style="font-family: monospace"/>
+              </group>
+            </page>
+            <page string="Notas" name="notas">
+              <field name="notas" nolabel="1"/>
+            </page>
+          </notebook>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_iag_estudio" model="ir.actions.act_window">
+    <field name="name">Estudios</field>
+    <field name="res_model">iag.estudio</field>
+    <field name="view_mode">tree,form</field>
+    <field name="help" type="html">
+      <p class="o_view_nocontent_smiling_face">Creá un estudio</p>
+      <p>Elegí el corpus, el template y los sintonizadores; después ejecutá los filtros uno a uno o todos juntos.</p>
+    </field>
+  </record>
+</odoo>

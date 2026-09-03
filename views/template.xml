@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <record id="view_iag_template_tree" model="ir.ui.view">
+    <field name="name">iag.template.tree</field>
+    <field name="model">iag.template</field>
+    <field name="arch" type="xml">
+      <tree>
+        <field name="name"/>
+        <field name="objetivo"/>
+        <field name="create_date" string="Creado"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="view_iag_template_form" model="ir.ui.view">
+    <field name="name">iag.template.form</field>
+    <field name="model">iag.template</field>
+    <field name="arch" type="xml">
+      <form string="Template">
+        <sheet>
+          <widget name="web_ribbon" title="Archivado" bg_color="bg-danger" attrs="{'invisible': [('active', '=', True)]}"/>
+          <div class="oe_title">
+            <h1><field name="name" placeholder="Nombre del template"/></h1>
+          </div>
+          <group>
+            <field name="active" invisible="1"/>
+            <field name="objetivo" placeholder="Alcance, paradigma de análisis, referencias a tener en cuenta"/>
+          </group>
+          <notebook>
+            <page string="Instrucciones" name="instrucciones">
+              <field name="instrucciones" placeholder="Cuerpo del prompt. Variables de contexto: {{nombre}}"/>
+            </page>
+            <page string="Variables" name="variables">
+              <p class="text-muted">Lista JSON de objetos <code>{"nombre", "descripcion", "default"}</code>. El Estudio puede sobreescribir los valores.</p>
+              <field name="variables_texto" nolabel="1" style="font-family: monospace"/>
+            </page>
+            <page string="Esquema de respuesta" name="esquema">
+              <p class="text-muted">JSON Schema (subconjunto: type, properties, required, enum, items, minimum, maximum). Decodificación valida cada respuesta contra este esquema.</p>
+              <field name="esquema_texto" nolabel="1" style="font-family: monospace"/>
+            </page>
+            <page string="Previsualización" name="previsualizacion">
+              <p class="text-muted">Lo que este template aporta al prompt, en el orden en que Composición lo arma, con las variables en sus valores por defecto. El material empírico lo inserta Composición desde el corpus del Estudio; el prompt efectivamente enviado se audita en cada registro Prompt.</p>
+              <field name="previsualizacion" nolabel="1" readonly="1"/>
+            </page>
+          </notebook>
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <record id="action_iag_template" model="ir.actions.act_window">
+    <field name="name">Templates</field>
+    <field name="res_model">iag.template</field>
+    <field name="view_mode">tree,form</field>
+    <field name="help" type="html">
+      <p class="o_view_nocontent_smiling_face">Creá un template de prompt</p>
+      <p>Cada template declara el objetivo del análisis, las instrucciones con variables de contexto y el esquema de la respuesta esperada.</p>
+    </field>
+  </record>
+</odoo>

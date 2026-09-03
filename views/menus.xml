@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <menuitem id="menu_iag_root" name="Análisis IAG" parent="wsfnoticias.wsf_noticias_root" sequence="50"/>
+  <menuitem id="menu_iag_estudios" name="Estudios" parent="menu_iag_root" action="action_iag_estudio" sequence="10"/>
+  <menuitem id="menu_iag_templates" name="Templates" parent="menu_iag_root" action="action_iag_template" sequence="20"/>
+  <menuitem id="menu_iag_auditoria" name="Auditoría" parent="menu_iag_root" sequence="30"/>
+  <menuitem id="menu_iag_embeddings" name="Embeddings" parent="menu_iag_auditoria" action="action_iag_embedding" sequence="10"/>
+  <menuitem id="menu_iag_prompts" name="Prompts" parent="menu_iag_auditoria" action="action_iag_prompt" sequence="20"/>
+  <menuitem id="menu_iag_respuestas" name="Respuestas" parent="menu_iag_auditoria" action="action_iag_respuesta" sequence="30"/>
+  <menuitem id="menu_iag_analisis" name="Análisis" parent="menu_iag_auditoria" action="action_iag_analisis" sequence="40"/>
+  <menuitem id="menu_iag_veredictos" name="Veredictos" parent="menu_iag_auditoria" action="action_iag_veredicto" sequence="50"/>
+  <menuitem id="menu_iag_resultados" name="Resultados" parent="menu_iag_auditoria" action="action_iag_resultado" sequence="60"/>
+  <menuitem id="menu_iag_config" name="Configuración" parent="menu_iag_root" action="action_iag_settings" sequence="90" groups="base.group_system"/>
+</odoo>

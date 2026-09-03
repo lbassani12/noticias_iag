@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <!-- Lista simple de noticias para abrir desde el Estudio, sin la barra de valoración de wsfnoticias.
+       Prioridad alta: no reemplaza la vista por defecto del addon base; se referencia por id. -->
+  <record id="view_noticia_tree_simple" model="ir.ui.view">
+    <field name="name">wsf_noticias_resultados.tree.simple.iag</field>
+    <field name="model">wsf_noticias_resultados</field>
+    <field name="priority" eval="99"/>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="fecha_registro" string="Registrada"/>
+        <field name="fecha_hora" string="Publicada" optional="show"/>
+        <field name="medio"/>
+        <field name="titulo"/>
+        <field name="regla2" string="Reglas aplicadas"/>
+        <field name="link" widget="url" optional="hide"/>
+      </tree>
+    </field>
+  </record>
+
+  <!-- Vistas de auditoría: sólo lectura. Los registros del flujo los crean los filtros. -->
+
+  <!-- Embedding -->
+  <record id="view_iag_embedding_tree" model="ir.ui.view">
+    <field name="name">iag.embedding.tree</field>
+    <field name="model">iag.embedding</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="id"/>
+        <field name="noticia_id"/>
+        <field name="dimension"/>
+        <field name="fecha_registro"/>
+      </tree>
+    </field>
+  </record>
+  <record id="view_iag_embedding_form" model="ir.ui.view">
+    <field name="name">iag.embedding.form</field>
+    <field name="model">iag.embedding</field>
+    <field name="arch" type="xml">
+      <form create="0" edit="0" delete="0">
+        <sheet>
+          <group>
+            <field name="noticia_id"/>
+            <field name="dimension"/>
+            <field name="vector_texto"/>
+            <field name="fecha_registro"/>
+          </group>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="action_iag_embedding" model="ir.actions.act_window">
+    <field name="name">Embeddings</field>
+    <field name="res_model">iag.embedding</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <!-- Prompt -->
+  <record id="view_iag_prompt_tree" model="ir.ui.view">
+    <field name="name">iag.prompt.tree</field>
+    <field name="model">iag.prompt</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="id"/>
+        <field name="template_id"/>
+        <field name="n_noticias"/>
+        <field name="temperatura"/>
+        <field name="longitud_salida"/>
+        <field name="fecha_registro"/>
+      </tree>
+    </field>
+  </record>
+  <record id="view_iag_prompt_form" model="ir.ui.view">
+    <field name="name">iag.prompt.form</field>
+    <field name="model">iag.prompt</field>
+    <field name="arch" type="xml">
+      <form create="0" edit="0" delete="0">
+        <sheet>
+          <group>
+            <group>
+              <field name="template_id"/>
+              <field name="fecha_registro"/>
+            </group>
+            <group>
+              <field name="temperatura"/>
+              <field name="longitud_salida"/>
+            </group>
+          </group>
+          <notebook>
+            <page string="Prompt completo" name="texto">
+              <field name="texto" nolabel="1" style="font-family: monospace"/>
+            </page>
+            <page string="Noticias del contexto" name="noticias">
+              <field name="noticia_ids" nolabel="1">
+                <tree><field name="fecha_hora"/><field name="medio"/><field name="titulo"/><field name="link" widget="url"/></tree>
+              </field>
+            </page>
+          </notebook>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="action_iag_prompt" model="ir.actions.act_window">
+    <field name="name">Prompts</field>
+    <field name="res_model">iag.prompt</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <!-- Respuesta -->
+  <record id="view_iag_respuesta_tree" model="ir.ui.view">
+    <field name="name">iag.respuesta.tree</field>
+    <field name="model">iag.respuesta</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="id"/>
+        <field name="prompt_id"/>
+        <field name="template_id"/>
+        <field name="fecha_registro"/>
+      </tree>
+    </field>
+  </record>
+  <record id="view_iag_respuesta_form" model="ir.ui.view">
+    <field name="name">iag.respuesta.form</field>
+    <field name="model">iag.respuesta</field>
+    <field name="arch" type="xml">
+      <form create="0" edit="0" delete="0">
+        <sheet>
+          <group>
+            <field name="prompt_id"/>
+            <field name="template_id"/>
+            <field name="fecha_registro"/>
+          </group>
+          <separator string="Respuesta cruda"/>
+          <field name="texto" nolabel="1" style="font-family: monospace"/>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="action_iag_respuesta" model="ir.actions.act_window">
+    <field name="name">Respuestas</field>
+    <field name="res_model">iag.respuesta</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <!-- Análisis -->
+  <record id="view_iag_analisis_tree" model="ir.ui.view">
+    <field name="name">iag.analisis.tree</field>
+    <field name="model">iag.analisis</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="id"/>
+        <field name="respuesta_id"/>
+        <field name="template_id"/>
+        <field name="fecha_registro"/>
+      </tree>
+    </field>
+  </record>
+  <record id="view_iag_analisis_form" model="ir.ui.view">
+    <field name="name">iag.analisis.form</field>
+    <field name="model">iag.analisis</field>
+    <field name="arch" type="xml">
+      <form create="0" edit="0" delete="0">
+        <header>
+          <button name="action_emitir_veredicto" string="Emitir veredicto" type="object" class="btn-primary"/>
+        </header>
+        <sheet>
+          <group>
+            <group>
+              <field name="respuesta_id"/>
+              <field name="prompt_id"/>
+              <field name="template_id"/>
+            </group>
+            <group>
+              <field name="fecha_registro"/>
+            </group>
+          </group>
+          <notebook>
+            <page string="Contenido" name="contenido">
+              <field name="contenido_texto" nolabel="1" style="font-family: monospace"/>
+            </page>
+            <page string="Evidencia" name="evidencia">
+              <field name="noticia_ids" nolabel="1">
+                <tree><field name="fecha_hora"/><field name="medio"/><field name="titulo"/><field name="link" widget="url"/></tree>
+              </field>
+            </page>
+            <page string="Veredictos" name="veredictos">
+              <field name="veredicto_ids" nolabel="1">
+                <tree><field name="estado"/><field name="confianza"/><field name="fecha_registro"/></tree>
+              </field>
+            </page>
+          </notebook>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="action_iag_analisis" model="ir.actions.act_window">
+    <field name="name">Análisis</field>
+    <field name="res_model">iag.analisis</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+
+  <!-- Resultado -->
+  <record id="view_iag_resultado_tree" model="ir.ui.view">
+    <field name="name">iag.resultado.tree</field>
+    <field name="model">iag.resultado</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="id"/>
+        <field name="n_veredictos"/>
+        <field name="fecha_registro"/>
+      </tree>
+    </field>
+  </record>
+  <record id="view_iag_resultado_form" model="ir.ui.view">
+    <field name="name">iag.resultado.form</field>
+    <field name="model">iag.resultado</field>
+    <field name="arch" type="xml">
+      <form create="0" edit="0" delete="0">
+        <sheet>
+          <group>
+            <field name="n_veredictos"/>
+            <field name="fecha_registro"/>
+          </group>
+          <notebook>
+            <page string="Presentación" name="html">
+              <field name="html" nolabel="1"/>
+            </page>
+            <page string="Contenido (JSON)" name="contenido">
+              <field name="contenido_texto" nolabel="1" style="font-family: monospace"/>
+            </page>
+            <page string="Veredictos consolidados" name="veredictos">
+              <field name="veredicto_ids" nolabel="1">
+                <tree><field name="analisis_id"/><field name="estado"/><field name="confianza"/></tree>
+              </field>
+            </page>
+          </notebook>
+        </sheet>
+      </form>
+    </field>
+  </record>
+  <record id="action_iag_resultado" model="ir.actions.act_window">
+    <field name="name">Resultados</field>
+    <field name="res_model">iag.resultado</field>
+    <field name="view_mode">tree,form</field>
+  </record>
+</odoo>
