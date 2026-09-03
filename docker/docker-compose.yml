@@ -27,7 +27,7 @@ services:
       - odoo-data:/var/lib/odoo
       # addons: el institucional y el de la tesina
       - ../../wsfnoticias:/mnt/extra-addons/wsfnoticias   # rw: escribe medio.log y telegram_norep.db en su carpeta
-      - ../:/mnt/extra-addons/wsfnoticias_iag
+      - ../:/mnt/extra-addons/noticias_iag
     command: ["odoo", "--dev=reload,qweb,xml"]
     # En el host, Ollama queda accesible como http://host.docker.internal:11434
     extra_hosts:

@@ -1,10 +1,10 @@
-# wsfnoticias_iag
+# noticias_iag
 
 Addon de Odoo 16 que implementa el pipeline de Tubos y Filtros de la tesina
 *Framework para el análisis de noticias de portales digitales mediante IAG* (L. Bassani, UNR)
 sobre el addon institucional [`wsfnoticias`](../wsfnoticias) (CAETI/CIM), que aporta el filtro de Extracción.
 
-Plan de trabajo: `Tesina_Bassani_Lucio/tmp/plan-addon-wsfnoticias-iag.md`.
+Plan de trabajo: `Tesina_Bassani_Lucio/tmp/plan-addon-noticias-iag.md`.
 
 ## Entorno de desarrollo (Docker)
 
@@ -21,9 +21,9 @@ docker compose logs -f odoo
 Instalar/actualizar el addon de la tesina cuando exista:
 
 ```bash
-docker compose run --rm odoo odoo -d tesina -i wsfnoticias_iag --stop-after-init
-docker compose run --rm odoo odoo -d tesina -u wsfnoticias_iag --stop-after-init
-docker compose run --rm odoo odoo -d tesina -u wsfnoticias_iag --test-enable --stop-after-init
+docker compose run --rm odoo odoo -d tesina -i noticias_iag --stop-after-init
+docker compose run --rm odoo odoo -d tesina -u noticias_iag --stop-after-init
+docker compose run --rm odoo odoo -d tesina -u noticias_iag --test-enable --stop-after-init
 ```
 
 Notas:

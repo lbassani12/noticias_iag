@@ -1,5 +1,5 @@
 # Odoo 16 + dependencias del addon institucional wsfnoticias.
-# El addon nuevo (wsfnoticias_iag) solo usa `requests` (ya viene con Odoo) y numpy opcional.
+# El addon nuevo (noticias_iag) solo usa `requests` (ya viene con Odoo) y numpy opcional.
 FROM odoo:16.0
 
 USER root
