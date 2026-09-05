@@ -19,6 +19,8 @@ Plan de trabajo: `Tesina_Bassani_Lucio/tmp/plan-addon-noticias-iag.md`.
 | Validador y canonicalizador de JSON Schema (subconjunto) | `services/esquema.py` |
 | El sumidero: proyección aplanada de los Resultados (`iag.resultado.fila`, vista SQL de sólo lectura) para las vistas pivot y graph nativas | `models/resultado_fila.py`, `views/tablero.xml` |
 | Tests de cardinalidades, procedencia, compuerta, ejecutor humano, monotonía, sintonizador de Normalización, tablero y ficha (27) | `tests/test_pipeline.py` |
+| Corpus del caso de aplicación (12.072 noticias, 64 portales, 29/03 → 30/05/2024) y su documentación | `corpus/` |
+| Cargador del corpus para `odoo shell` (idempotente, con verificación) | `scripts/cargar_corpus.py` |
 
 Menú: **Noticias ▸ Análisis IAG** (Estudios, Templates, Tablero, Auditoría, Configuración).
 Grupos: reutiliza `wsfnoticias.noticias_analista` (CRUD) y `wsfnoticias.noticias_operadores` (lectura).
@@ -54,10 +56,26 @@ Si pasó igual: `docker compose restart odoo`.
 **Quitar un campo borra su columna.** Al actualizar con `-u`, Odoo 16 elimina la columna de todo campo que ya no esté
 en el modelo, con sus datos. Antes de quitar un campo con datos, migrarlos (script en `odoo shell`) y recién después actualizar.
 
+## Cargar el corpus del caso de aplicación
+
+El repo trae el corpus real de la tesina en `corpus/` (el export institucional de `wsf_noticias_resultados`,
+documentado en [`corpus/README.md`](corpus/README.md)). Con el entorno levantado, desde `docker/`:
+
+```bash
+docker compose exec -T odoo sh -c \
+  "CORPUS=/mnt/extra-addons/noticias_iag/corpus/wsfnoticias_resultados_2024-03-29_2024-05-30.xlsx \
+   odoo shell -d tesina --no-http" < ../scripts/cargar_corpus.py
+```
+
+Crea las 12.072 noticias, los 64 medios y las cinco reglas de extracción; se puede relanzar (saltea lo ya
+cargado) y con `CORPUS_VERIFICAR=1` sólo compara el archivo con la base. Después, Noticias ▸ Resultados
+muestra el corpus y cualquier Estudio lo recorta por reglas, fechas y medios.
+
 ## Correr un estudio
 
-1. **Corpus.** La Extracción es `wsfnoticias`: cargar un medio (partner + `wsf_noticias_medios` con RSS) y una regla
-   (`wsf_noticias_reglas` con términos OR). Disparar el scraping a mano desde `odoo shell`
+1. **Corpus.** Lo más directo es cargar el corpus del repo (sección anterior). La otra vía es la Extracción
+   de `wsfnoticias`: cargar un medio (partner + `wsf_noticias_medios` con RSS) y una regla
+   (`wsf_noticias_reglas` con términos OR) y disparar el scraping a mano desde `odoo shell`
    (`env['wsf_noticias_medios'].scrap_importancia_<importancia>()`) o esperar el cron (`cat1`, cada 80').
 2. **Template.** Noticias ▸ Análisis IAG ▸ Templates. Vienen dos de ejemplo: *Agenda-setting de segundo nivel
    (por noticia)* y *Resumen agregado del corpus*.
