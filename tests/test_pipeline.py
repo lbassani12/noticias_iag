@@ -418,8 +418,12 @@ class TestPipeline(TransactionCase):
 
     def test_20_claves_a_consolidar_como_filas(self):
         est = self._estudio()
-        # filas desde el esquema del template; por defecto se tildan opciones cerradas y numéricas
-        self.assertEqual(est.clave_ids.mapped('nombre'), list(self.template.esquema_respuesta['properties']))
+        # filas desde el esquema del template, en el orden del autor (el de `required`; jsonb no conserva el de
+        # `properties`); por defecto se tildan opciones cerradas y numéricas
+        esquema = self.template.esquema_respuesta
+        self.assertEqual(est.clave_ids.mapped('nombre'), self.env['iag.template']._orden_claves(esquema))
+        self.assertEqual(est.clave_ids.mapped('nombre')[:len(esquema['required'])], esquema['required'])
+        self.assertEqual(set(est.clave_ids.mapped('nombre')), set(esquema['properties']))
         tildadas = est.clave_ids.filtered('consolidar').mapped('nombre')
         self.assertEqual(set(tildadas), {'tema', 'tono', 'encuadre', 'relevancia_regional'})
         self.assertIn('opciones:', est.clave_ids.filtered(lambda c: c.nombre == 'tema').tipo)
@@ -482,3 +486,171 @@ class TestPipeline(TransactionCase):
         self.assertEqual(est2.state, 'decodificado')
         self.assertEqual(len(est2.analisis_ids), 0)
         self.assertEqual(len(est2.informe['invocacion']['fallidas']), 2)
+
+    # --- Resultado y sumidero (2026-09-04): variable del experto, condición, cruces, tablero, ficha ---
+    def test_23_variable_del_experto(self):
+        est = self._estudio(agrupar_por='variable', variable_nombre='tipo de prensa', variable_dominio='medio')
+        est.action_seleccionar_corpus()
+        est.action_poblar_asignaciones()                       # una fila por medio del corpus, sin valor
+        self.assertEqual(set(est.asignacion_ids.mapped('medio_id')), set(self.medio_a | self.medio_b))
+        self.assertEqual(est.n_sin_asignar, self.N)
+        est.asignacion_ids.filtered(lambda a: a.medio_id == self.medio_a).valor = 'nacional'
+        self.assertEqual(est.n_sin_asignar, len(self.noticias.filtered(lambda n: n.medio == self.medio_b)))
+        self.assertEqual(est.asignacion_ids.filtered(lambda a: a.medio_id == self.medio_a).n_noticias,
+                         len(self.noticias.filtered(lambda n: n.medio == self.medio_a)))
+        est.action_poblar_asignaciones()                       # idempotente: conserva el valor cargado
+        self.assertEqual(len(est.asignacion_ids), 2)
+        self.assertEqual(est._sintonizador('normalizacion')['variable'],
+                         {'nombre': 'tipo de prensa', 'dominio': 'medio', 'asignacion': {'Portal A (test)': 'nacional'}})
+        est.action_ejecutar_todo()
+        c = est.resultado_id.contenido
+        self.assertEqual(c['grupos'], ['nacional', '(sin asignar)'])
+        self.assertEqual(c['politica_aplicada']['variable']['asignacion'], {'Portal A (test)': 'nacional'})
+        grupos = {f['grupo'] for f in c['filas']}
+        self.assertEqual(grupos, {'nacional', '(sin asignar)'})
+        self.assertEqual(len(c['filas']), self.N)
+        self.assertTrue(all(f['incluido'] for f in c['filas']))
+        # el cruce de una clave tiene n por grupo, porcentajes por fila que suman 100 y V de Cramér
+        cruce = c['cruces']['tema']
+        self.assertEqual(sum(cruce['n_por_grupo'].values()), self.N)
+        for g in c['grupos']:
+            self.assertAlmostEqual(sum(cruce['pct'][g].values()), 100.0, delta=0.3)
+        self.assertIn('v_cramer', cruce)
+        self.assertIn('tipo de prensa', est.resultado_id.html)
+        html = est.resultado_id.html
+        self.assertLess(html.index('<th>nacional</th>'), html.index('<th>(sin asignar)</th>'))   # el orden del experto, no el de jsonb
+        # la iteración hereda la tabla; la ficha documenta la variable
+        nuevo = self.env['iag.estudio'].browse(est.action_nueva_iteracion()['res_id'])
+        self.assertEqual(nuevo._tabla_asignacion(), {'Portal A (test)': 'nacional'})
+        self.assertIn('nacional', est.ficha_html)
+        # por departamento: la misma mecánica sobre la otra clave de procedencia
+        est2 = self._estudio(agrupar_por='variable', variable_dominio='departamento')
+        est2.action_seleccionar_corpus()
+        est2.action_poblar_asignaciones()
+        self.assertEqual(set(est2.asignacion_ids.mapped('departamento')), {'Rosario', 'La Capital'})
+        for a in est2.asignacion_ids:
+            a.valor = 'rosario' if a.departamento == 'Rosario' else 'interior'
+        est2.action_ejecutar_todo()
+        self.assertEqual(est2.resultado_id.contenido['grupos'], ['interior', 'rosario'])   # orden de la tabla del experto
+
+    def test_24_condicion_de_inclusion(self):
+        est = self._estudio(agrupar_por='medio')
+        est.condicion_clave_id = est.clave_ids.filtered(lambda c: c.nombre == 'tono')
+        est.condicion_valor = 'Negativo'                        # sin distinguir mayúsculas
+        self.assertEqual(est._sintonizador('normalizacion')['condicion'], {'clave': 'tono', 'valor': 'Negativo'})
+        est.action_ejecutar_todo()
+        c = est.resultado_id.contenido
+        negativos = est.analisis_ids.filtered(lambda a: a.contenido.get('tono') == 'negativo')
+        self.assertEqual(c['resumen']['incluidos'], len(negativos))
+        self.assertEqual(c['resumen']['excluidos_por_condicion'], self.N - len(negativos))
+        self.assertEqual(c['politica_aplicada']['condicion'], {'clave': 'tono', 'valor': 'Negativo'})
+        self.assertEqual(len(est.resultado_id.veredicto_ids), self.N)          # compuerta blanda: nada se suprime
+        self.assertEqual(sum(1 for f in c['filas'] if f['motivo'] == 'condicion'), self.N - len(negativos))
+        if negativos:
+            self.assertEqual(sum(c['distribuciones']['tema'].values()), len(negativos))
+            self.assertEqual(set(c['distribuciones']['tono']), {'negativo'})
+            self.assertTrue(c['cruces']['tono']['colapso'])                    # una sola categoría: concentrada
+        self.assertIn('Condición de inclusión', est.resultado_id.html)
+        # sobre una lista alcanza con que un elemento coincida
+        est2 = self._estudio()
+        est2.condicion_clave_id = est2.clave_ids.filtered(lambda c: c.nombre == 'actores')
+        est2.action_ejecutar_todo()                                             # sin valor: la condición no aplica
+        self.assertNotIn('condicion', est2.resultado_id.contenido['politica_aplicada'])
+        self.assertEqual(est2.resultado_id.contenido['resumen']['incluidos'], self.N)
+
+    def test_25_cruces_y_colapso(self):
+        from ..models.filtros.normalizacion import v_cramer, wilson
+        # V de Cramér: independencia perfecta → 0; asociación perfecta 2×2 → 1
+        self.assertEqual(v_cramer({'a': {'x': 10, 'y': 10}, 'b': {'x': 10, 'y': 10}}), 0.0)
+        self.assertEqual(v_cramer({'a': {'x': 10, 'y': 0}, 'b': {'x': 0, 'y': 10}}), 1.0)
+        self.assertIsNone(v_cramer({'a': {'x': 10}}))
+        p, lo, hi = wilson(5, 10)
+        self.assertEqual(p, 0.5)
+        self.assertTrue(lo < 0.5 < hi and 0.23 < lo < 0.24 and 0.76 < hi < 0.77)
+        # respuestas idénticas para todas las noticias: todas las claves colapsan y los booleanos traen IC
+        template = self.env['iag.template'].create({
+            'name': 'Booleanos (test)', 'objetivo': 'Prueba', 'instrucciones': 'Respondé.',
+            'esquema_respuesta': {'type': 'object', 'required': ['es_local', 'tema'],
+                                  'properties': {'es_local': {'type': 'boolean'},
+                                                 'tema': {'type': 'string', 'enum': ['a', 'b']}}}})
+        est = self._estudio(template_id=template.id, agrupar_por='medio').with_context(
+            iag_fake_respuesta='{"es_local": true, "tema": "a"}')
+        est.action_ejecutar_todo()
+        c = est.resultado_id.contenido
+        self.assertTrue(c['cruces']['tema']['colapso'])
+        self.assertEqual(c['cruces']['tema']['concentracion'], 1.0)
+        self.assertEqual(c['cruces']['tema']['valor_dominante'], 'a')
+        self.assertTrue(c['cruces']['es_local']['colapso'])
+        for g, ic in c['cruces']['es_local']['proporcion_true'].items():
+            self.assertEqual(ic[0], 1.0)
+            self.assertLess(ic[1], 1.0)
+        self.assertIn('poco informativa', est.resultado_id.html)
+        self.assertIn('IC 95', est.resultado_id.html)
+
+    def test_26_tablero_proyeccion_del_resultado(self):
+        Fila = self.env['iag.resultado.fila']
+        est = self._estudio(agrupar_por='variable')
+        est.action_seleccionar_corpus()
+        est.action_poblar_asignaciones()
+        est.asignacion_ids.filtered(lambda a: a.medio_id == self.medio_a).valor = 'nacional'
+        est.asignacion_ids.filtered(lambda a: a.medio_id == self.medio_b).valor = 'interior'
+        est.condicion_clave_id = est.clave_ids.filtered(lambda c: c.nombre == 'tono')
+        est.condicion_valor = 'negativo'
+        self.env.flush_all()
+        self.assertFalse(Fila.search([('estudio_id', '=', est.id)]))          # sin Resultado no hay tablero
+        with self.assertRaises(UserError):
+            est.action_ver_tablero()
+        est.action_ejecutar_todo()
+        self.env.flush_all()                                                   # la vista SQL lee lo persistido
+        filas = Fila.search([('resultado_id', '=', est.resultado_id.id)])
+        self.assertTrue(filas)
+        # una fila por veredicto y por clave escalar (más un elemento por actor); nada de las afirmaciones
+        esperadas = 0
+        for a in est.analisis_ids:
+            for k, v in a.contenido.items():
+                if isinstance(v, list):
+                    esperadas += sum(1 for x in v if not isinstance(x, (dict, list)))
+                elif not isinstance(v, dict):
+                    esperadas += 1
+        self.assertEqual(len(filas), esperadas)
+        self.assertEqual(set(filas.mapped('clave')) & {'afirmaciones'}, set())
+        self.assertEqual(set(filas.mapped('grupo')), {'nacional', 'interior'})
+        self.assertEqual(set(filas.mapped('estudio_id')), set(est))
+        # cada fila lleva su veredicto (D) y su análisis y noticia (E)
+        for f in filas[:10]:
+            self.assertEqual(f.veredicto_id.analisis_id, f.analisis_id)
+            self.assertEqual(f.veredicto_estado, f.veredicto_id.estado)
+            self.assertEqual(f.noticia_id, f.analisis_id.noticia_ids)
+            self.assertEqual(f.medio_id, f.noticia_id.medio)
+        # el flag de consolidación sigue a la condición
+        negativos = est.analisis_ids.filtered(lambda a: a.contenido.get('tono') == 'negativo')
+        self.assertEqual(set(filas.filtered('incluido').mapped('analisis_id')), set(negativos))
+        # el tablero se abre desde el Estudio y desde el Resultado, con la primera clave y "consolidados" preseleccionados
+        accion = est.action_ver_tablero()
+        self.assertEqual(accion['res_model'], 'iag.resultado.fila')
+        self.assertEqual(accion['context']['search_default_clave'], 'tema')
+        self.assertEqual(accion['context']['search_default_incluido'], 1)
+        self.assertEqual(accion['domain'], [('resultado_id', '=', est.resultado_id.id)])
+        # el pivot del tablero reproduce el cruce del Resultado: tema × grupo sobre los consolidados
+        pivot = Fila.read_group([('resultado_id', '=', est.resultado_id.id), ('incluido', '=', True), ('clave', '=', 'tema')],
+                                ['grupo', 'valor'], ['grupo', 'valor'], lazy=False)
+        cruce = est.resultado_id.contenido['cruces'].get('tema', {}).get('tabla', {})
+        for celda in pivot:
+            self.assertEqual(celda['__count'], cruce[celda['grupo']][celda['valor']])
+        # es una vista SQL de sólo lectura: el sumidero no escribe en el repositorio
+        self.assertFalse(Fila._auto)
+        self.env.cr.execute("SELECT relkind FROM pg_class WHERE relname = %s", (Fila._table,))
+        self.assertEqual(self.env.cr.fetchone()[0], 'v')
+
+    def test_27_ficha_del_estudio(self):
+        est = self._estudio(notas='Umbral fijado por presupuesto.')
+        self.assertIn('Selección del corpus', est.ficha_html)
+        self.assertIn(self.template.name, est.ficha_html)
+        self.assertIn('Sin corrida todavía', est.ficha_html)
+        est.action_ejecutar_todo()
+        ficha = est.ficha_html
+        self.assertIn('N = %d' % self.N, ficha)
+        self.assertIn('fake', ficha)                                            # configuración técnica de la corrida
+        self.assertIn('Umbral fijado por presupuesto', ficha)
+        self.assertIn('Veredicto[M′]', ficha)
+        self.assertNotIn('api_key', ficha)

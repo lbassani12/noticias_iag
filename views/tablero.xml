@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <!-- El sumidero: proyección aplanada de los Resultados para las vistas pivot y graph nativas de Odoo. -->
+  <record id="view_iag_resultado_fila_search" model="ir.ui.view">
+    <field name="name">iag.resultado.fila.search</field>
+    <field name="model">iag.resultado.fila</field>
+    <field name="arch" type="xml">
+      <search>
+        <field name="clave" operator="="/>
+        <field name="valor"/>
+        <field name="grupo"/>
+        <field name="medio_id"/>
+        <field name="estudio_id"/>
+        <field name="resultado_id"/>
+        <filter name="incluido" string="Consolidados" domain="[('incluido', '=', True)]" help="Los que entraron en la consolidación según la política sobre observados y la condición de inclusión."/>
+        <filter name="excluidos" string="Excluidos de la consolidación" domain="[('incluido', '=', False)]"/>
+        <separator/>
+        <filter name="validos" string="Veredicto válido" domain="[('veredicto_estado', '=', 'valido')]"/>
+        <filter name="observados" string="Veredicto observado" domain="[('veredicto_estado', '=', 'observado')]"/>
+        <filter name="no_sustentados" string="Veredicto no sustentado" domain="[('veredicto_estado', '=', 'no_sustentado')]"/>
+        <group expand="0" string="Agrupar por">
+          <filter name="gb_grupo" string="Grupo" context="{'group_by': 'grupo'}"/>
+          <filter name="gb_medio" string="Medio" context="{'group_by': 'medio_id'}"/>
+          <filter name="gb_departamento" string="Departamento" context="{'group_by': 'departamento'}"/>
+          <filter name="gb_semana" string="Semana" context="{'group_by': 'fecha:week'}"/>
+          <filter name="gb_dia" string="Día" context="{'group_by': 'fecha:day'}"/>
+          <filter name="gb_clave" string="Clave" context="{'group_by': 'clave'}"/>
+          <filter name="gb_valor" string="Valor" context="{'group_by': 'valor'}"/>
+          <filter name="gb_estado" string="Estado del veredicto" context="{'group_by': 'veredicto_estado'}"/>
+        </group>
+      </search>
+    </field>
+  </record>
+
+  <record id="view_iag_resultado_fila_pivot" model="ir.ui.view">
+    <field name="name">iag.resultado.fila.pivot</field>
+    <field name="model">iag.resultado.fila</field>
+    <field name="arch" type="xml">
+      <pivot string="Tablero" disable_linking="0" sample="0">
+        <field name="grupo" type="row"/>
+        <field name="valor" type="col"/>
+      </pivot>
+    </field>
+  </record>
+
+  <record id="view_iag_resultado_fila_graph" model="ir.ui.view">
+    <field name="name">iag.resultado.fila.graph</field>
+    <field name="model">iag.resultado.fila</field>
+    <field name="arch" type="xml">
+      <graph string="Tablero" type="bar" stacked="True">
+        <field name="grupo" type="row"/>
+        <field name="valor" type="col"/>
+      </graph>
+    </field>
+  </record>
+
+  <record id="view_iag_resultado_fila_tree" model="ir.ui.view">
+    <field name="name">iag.resultado.fila.tree</field>
+    <field name="model">iag.resultado.fila</field>
+    <field name="arch" type="xml">
+      <tree create="0" edit="0" delete="0">
+        <field name="estudio_id" optional="hide"/>
+        <field name="grupo"/>
+        <field name="medio_id"/>
+        <field name="fecha"/>
+        <field name="clave"/>
+        <field name="valor"/>
+        <field name="veredicto_estado"/>
+        <field name="confianza"/>
+        <field name="incluido"/>
+        <field name="analisis_id"/>
+        <field name="noticia_id"/>
+      </tree>
+    </field>
+  </record>
+
+  <record id="action_iag_tablero" model="ir.actions.act_window">
+    <field name="name">Tablero</field>
+    <field name="res_model">iag.resultado.fila</field>
+    <field name="view_mode">pivot,graph,tree</field>
+    <field name="search_view_id" ref="view_iag_resultado_fila_search"/>
+    <field name="context">{'search_default_incluido': 1, 'pivot_row_groupby': ['grupo'], 'pivot_column_groupby': ['valor']}</field>
+    <field name="help" type="html">
+      <p class="o_view_nocontent_smiling_face">Todavía no hay Resultados consolidados</p>
+      <p>El tablero muestra los análisis de cada Resultado, una fila por clave del esquema, con su veredicto. Filtrá por estudio y por clave; cruzá por grupo, medio o semana.</p>
+    </field>
+  </record>
+</odoo>

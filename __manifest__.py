@@ -21,6 +21,7 @@ un modelo por cada tipo de dato del pipeline, el panel de templates y el Estudio
         'views/tipos.xml',
         'views/veredicto.xml',
         'views/estudio.xml',
+        'views/tablero.xml',
         'views/settings.xml',
         'views/menus.xml',
         'data/templates.xml',

@@ -288,48 +288,191 @@ class Resultado(models.Model):
         for rec in self:
             rec.html = _render_html(rec.contenido or {})
 
+    def action_ver_tablero(self):
+        """El sumidero: la proyección aplanada de este Resultado en pivot y gráfico."""
+        self.ensure_one()
+        claves = ((self.contenido or {}).get('politica_aplicada') or {}).get('claves_comparacion') or []
+        return self.env['iag.resultado.fila'].accion_tablero([('resultado_id', '=', self.id)], self.display_name,
+                                                             clave=claves[0] if claves else None)
+
 
 def _celda(v):
-    if isinstance(v, (dict, list)):
+    if isinstance(v, dict):
+        return escape('; '.join('%s: %s' % (k, _celda(x)) for k, x in v.items()))
+    if isinstance(v, list):
         return escape(json.dumps(v, ensure_ascii=False))
+    if isinstance(v, float):
+        return escape(('%.4f' % v).rstrip('0').rstrip('.').replace('.', ','))
     return escape('' if v is None else v)
 
 
-def _tabla_distribucion(valores):
-    filas = ''.join('<tr><td>%s</td><td class="text-end">%s</td></tr>' % (_celda(k), n)
+def _tabla_menciones(cruce, nombre_variable, top=8, orden=None):
+    """Claves de lista (p. ej. actores): los valores más nombrados en cada grupo, con n y % de las menciones."""
+    partes = ['<table class="table table-sm table-bordered"><thead><tr><th>%s</th><th class="text-end">menciones</th>'
+              '<th>más nombrados</th></tr></thead><tbody>' % _celda(nombre_variable)]
+    for g in _grupos(cruce, orden):
+        fila, n = cruce['tabla'][g], cruce['n_por_grupo'][g]
+        orden = sorted(((v, k) for k, v in fila.items() if k != '(otros)' and v), reverse=True)[:top]
+        lista = '; '.join('%s (%s, %s %%)' % (_celda(k), v, _pct(cruce['pct'][g].get(k, 0.0))) for v, k in orden) or '–'
+        partes.append('<tr><th>%s</th><td class="text-end">%s</td><td>%s</td></tr>' % (_celda(g), n, lista))
+    partes.append('</tbody></table>')
+    return ''.join(partes)
+
+
+def _pct(x):
+    return ('%.1f' % x).replace('.', ',') if x is not None else '–'
+
+
+def _tabla_distribucion(valores, total=None):
+    total = total or sum(valores.values()) or 1
+    filas = ''.join('<tr><td>%s</td><td class="text-end">%s</td><td class="text-end">%s %%</td></tr>'
+                    % (_celda(k), n, _pct(100.0 * n / total))
                     for k, n in sorted(valores.items(), key=lambda kv: (-kv[1], str(kv[0]))))
-    return ('<table class="table table-sm table-bordered"><thead><tr><th>Valor</th><th class="text-end">n</th></tr></thead>'
-            '<tbody>%s</tbody></table>' % filas)
+    return ('<table class="table table-sm table-bordered w-auto"><thead><tr><th>Valor</th><th class="text-end">n</th>'
+            '<th class="text-end">%%</th></tr></thead><tbody>%s</tbody></table>' % filas)
+
+
+def _grupos(cruce, orden):
+    """Los grupos del cruce en el orden de presentación (jsonb no conserva el orden de las claves de un objeto)."""
+    tabla = cruce.get('tabla') or {}
+    return [g for g in (orden or []) if g in tabla] + [g for g in tabla if g not in (orden or [])]
+
+
+def _tabla_cruce(clave, cruce, nombre_variable, orden=None):
+    """Una tabla por clave: filas = grupos (más el total), columnas = valores, celdas "n (pct %)"."""
+    valores = cruce.get('valores') or []
+    grupos = _grupos(cruce, orden)
+    cab = ''.join('<th class="text-end">%s</th>' % _celda(v) for v in valores)
+    partes = ['<table class="table table-sm table-bordered"><thead><tr><th>%s</th>%s<th class="text-end">n</th></tr></thead><tbody>'
+              % (_celda(nombre_variable), cab)]
+    for g in grupos:
+        fila, pct, n = cruce['tabla'][g], cruce['pct'][g], cruce['n_por_grupo'][g]
+        celdas = ''.join('<td class="text-end">%s <small class="text-muted">(%s %%)</small></td>' % (fila.get(v, 0), _pct(pct.get(v, 0.0)))
+                         for v in valores)
+        partes.append('<tr><th>%s</th>%s<td class="text-end">%s</td></tr>' % (_celda(g), celdas, n))
+    total = sum(cruce['global'].values())
+    celdas = ''.join('<td class="text-end">%s <small class="text-muted">(%s %%)</small></td>'
+                     % (cruce['global'].get(v, 0), _pct(100.0 * cruce['global'].get(v, 0) / total if total else 0.0)) for v in valores)
+    partes.append('<tr class="table-active"><th>Total</th>%s<td class="text-end">%s</td></tr></tbody></table>' % (celdas, total))
+    return ''.join(partes)
+
+
+def _nota_cruce(cruce):
+    unidad = 'menciones' if cruce.get('unidad') == 'menciones' else 'análisis'
+    notas = ['unidad: %s' % unidad]
+    if cruce.get('concentracion') is not None:
+        notas.append('categoría dominante: %s (%s %%)' % (_celda(cruce.get('valor_dominante')), _pct(100.0 * cruce['concentracion'])))
+    if cruce.get('v_cramer') is not None:
+        notas.append('V de Cramér = %s' % ('%.2f' % cruce['v_cramer']).replace('.', ','))
+    texto = '<p><small class="text-muted">%s.</small></p>' % '; '.join(notas)
+    if cruce.get('colapso'):
+        texto += ('<p><small class="text-warning">Clave concentrada en una categoría: poco informativa en este corpus; '
+                  'se reporta y no se interpreta.</small></p>')
+    return texto
+
+
+def _tabla_proporciones(clave, cruce, nombre_variable, orden=None):
+    partes = ['<table class="table table-sm table-bordered w-auto"><thead><tr><th>%s</th><th class="text-end">n</th>'
+              '<th class="text-end">%% true</th><th class="text-end">IC 95 %%</th></tr></thead><tbody>' % _celda(nombre_variable)]
+    proporciones = cruce.get('proporcion_true') or {}
+    for g in [g for g in (orden or []) if g in proporciones] + [g for g in proporciones if g not in (orden or [])]:
+        ic = proporciones[g]
+        if not ic:
+            continue
+        partes.append('<tr><th>%s</th><td class="text-end">%s</td><td class="text-end">%s</td><td class="text-end">[%s ; %s]</td></tr>'
+                      % (_celda(g), cruce['n_por_grupo'][g], _pct(100 * ic[0]), _pct(100 * ic[1]), _pct(100 * ic[2])))
+    partes.append('</tbody></table>')
+    return ''.join(partes)
 
 
 def _render_html(c):
     partes = []
     resumen = c.get('resumen') or {}
-    partes.append('<h3>Resumen de la corrida</h3><table class="table table-sm"><tbody>')
-    for k, v in resumen.items():
-        partes.append('<tr><th style="width:40%%">%s</th><td>%s</td></tr>' % (_celda(k), _celda(v)))
-    partes.append('</tbody></table>')
     politica = c.get('politica_aplicada') or {}
+    variable = politica.get('variable') or {}
+    nombre_variable = variable.get('nombre') or {'medio': 'Medio', 'departamento': 'Departamento', 'dia': 'Día',
+                                                 'semana': 'Semana'}.get(politica.get('agrupar_por'), 'Grupo')
+    orden = c.get('grupos') or []
+    # --- Resumen del recorrido -----------------------------------------------------------------
+    partes.append('<h3>Resumen de la consolidación</h3><table class="table table-sm w-auto"><tbody>')
+    etiquetas = [('n_noticias', 'Noticias en los prompts (N)'), ('m_prompts', 'Prompts (M)'), ('m_analisis', 'Análisis (M′)'),
+                 ('m_veredictos', 'Veredictos (M′)'), ('incluidos', 'Consolidados'),
+                 ('excluidos_por_politica', 'Excluidos por la política sobre observados'),
+                 ('excluidos_por_condicion', 'Excluidos por la condición de inclusión'),
+                 ('veredictos_por_estado', 'Veredictos por estado'), ('confianza_media', 'Confianza media de los consolidados')]
+    for k, etiqueta in etiquetas:
+        if k in resumen:
+            partes.append('<tr><th>%s</th><td>%s</td></tr>' % (etiqueta, _celda(resumen[k])))
+    partes.append('</tbody></table>')
+    # --- Criterios aplicados -------------------------------------------------------------------
     if politica:
-        partes.append('<p><small>Política aplicada: %s</small></p>' % _celda(politica))
-    dist = c.get('distribuciones') or {}
-    if dist:
-        partes.append('<h3>Distribuciones</h3>')
-        for clave, valores in dist.items():
-            partes.append('<h4>%s</h4>%s' % (_celda(clave), _tabla_distribucion(valores)))
+        partes.append('<h3>Criterios de consolidación aplicados</h3><ul>')
+        partes.append('<li>Política sobre los observados: <b>%s</b></li>' % _celda(politica.get('politica_observados')))
+        if politica.get('condicion'):
+            partes.append('<li>Condición de inclusión: <b>%s = %s</b></li>' % (_celda(politica['condicion'].get('clave')),
+                                                                                _celda(politica['condicion'].get('valor'))))
+        if variable:
+            partes.append('<li>Variable de comparación del experto <b>%s</b>, asignada según <b>%s</b>:</li>'
+                          % (_celda(variable.get('nombre')), _celda(variable.get('dominio'))))
+            asignacion = variable.get('asignacion') or {}
+            por_valor = {g: [] for g in orden if g in asignacion.values()}
+            for k, v in asignacion.items():
+                por_valor.setdefault(v, []).append(k)
+            partes.append('<table class="table table-sm table-bordered w-auto"><thead><tr><th>Valor</th><th>%s</th></tr></thead><tbody>'
+                          % ('Departamentos' if variable.get('dominio') == 'departamento' else 'Medios'))
+            for v, ks in por_valor.items():
+                partes.append('<tr><th>%s</th><td>%s</td></tr>' % (_celda(v), _celda('; '.join(sorted(ks)))))
+            partes.append('</tbody></table>')
+        else:
+            partes.append('<li>Agrupación: <b>%s</b></li>' % _celda(politica.get('agrupar_por')))
+        partes.append('<li>Claves consolidadas: %s</li></ul>' % _celda(', '.join(politica.get('claves_comparacion') or [])))
+    # --- Cruces ---------------------------------------------------------------------------------
+    cruces = c.get('cruces') or {}
+    if cruces:
+        partes.append('<h3>Cruces por %s</h3>' % _celda(nombre_variable) if politica.get('agrupar_por') != 'ninguno'
+                      else '<h3>Distribuciones</h3>')
+        for clave, cruce in cruces.items():
+            partes.append('<h4>%s</h4>' % _celda(clave))
+            if cruce.get('tabla') and cruce.get('unidad') == 'menciones':
+                partes.append(_tabla_menciones(cruce, nombre_variable, orden=orden))
+            elif cruce.get('tabla'):
+                partes.append(_tabla_cruce(clave, cruce, nombre_variable, orden=orden))
+                if cruce.get('proporcion_true'):
+                    partes.append(_tabla_proporciones(clave, cruce, nombre_variable, orden=orden))
+            else:
+                partes.append(_tabla_distribucion(cruce.get('global') or {}))
+            partes.append(_nota_cruce(cruce))
+    else:
+        dist = c.get('distribuciones') or {}
+        if dist:
+            partes.append('<h3>Distribuciones</h3>')
+            for clave, valores in dist.items():
+                partes.append('<h4>%s</h4>%s' % (_celda(clave), _tabla_distribucion(valores)))
+    # --- Numéricas -------------------------------------------------------------------------------
     num = c.get('numericas') or {}
     if num:
-        partes.append('<h3>Variables numéricas</h3><table class="table table-sm table-bordered"><thead><tr>'
-                      '<th>Clave</th><th>n</th><th>mín</th><th>media</th><th>máx</th></tr></thead><tbody>')
+        partes.append('<h3>Variables numéricas</h3><table class="table table-sm table-bordered w-auto"><thead><tr>'
+                      '<th>Clave</th><th>%s</th><th>n</th><th>mín</th><th>media</th><th>máx</th></tr></thead><tbody>' % _celda(nombre_variable))
         for clave, st in num.items():
-            partes.append('<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (
+            partes.append('<tr><td>%s</td><td>Total</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (
                 _celda(clave), st.get('n'), st.get('min'), st.get('media'), st.get('max')))
+            porg = (c.get('numericas_por_grupo') or {}).get(clave) or {}
+            for g in [g for g in orden if g in porg] + [g for g in porg if g not in orden]:
+                stg = porg[g]
+                partes.append('<tr><td></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>' % (
+                    _celda(g), stg.get('n'), stg.get('min'), stg.get('media'), stg.get('max')))
         partes.append('</tbody></table>')
-    por_grupo = c.get('por_grupo') or {}
-    if por_grupo:
-        partes.append('<h3>Por grupo</h3>')
-        for grupo, claves in por_grupo.items():
-            partes.append('<h4>%s</h4>' % _celda(grupo))
-            for clave, valores in claves.items():
-                partes.append('<h5>%s</h5>%s' % (_celda(clave), _tabla_distribucion(valores)))
+    # --- Veredictos por grupo ---------------------------------------------------------------------
+    vg = c.get('veredictos_por_grupo') or {}
+    if vg and politica.get('agrupar_por') != 'ninguno':
+        partes.append('<h3>Verificación por %s</h3><table class="table table-sm table-bordered w-auto"><thead><tr><th>%s</th>'
+                      '<th class="text-end">veredictos</th><th class="text-end">consolidados</th><th>por estado</th>'
+                      '<th class="text-end">confianza media</th></tr></thead><tbody>' % (_celda(nombre_variable), _celda(nombre_variable)))
+        for g in [g for g in orden if g in vg] + [g for g in vg if g not in orden]:
+            d = vg[g]
+            partes.append('<tr><th>%s</th><td class="text-end">%s</td><td class="text-end">%s</td><td>%s</td><td class="text-end">%s</td></tr>'
+                          % (_celda(g), d.get('n'), d.get('incluidos'), _celda(d.get('por_estado')), _celda(d.get('confianza_media'))))
+        partes.append('</tbody></table>')
+    partes.append('<p><small class="text-muted">Cada fila de estos cruces se puede reordenar y graficar en el Tablero '
+                  '(pivot y gráfico sobre los análisis consolidados de este Resultado).</small></p>')
     return ''.join(partes)

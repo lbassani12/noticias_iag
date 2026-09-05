@@ -17,9 +17,10 @@ Plan de trabajo: `Tesina_Bassani_Lucio/tmp/plan-addon-noticias-iag.md`.
 | Los seis filtros, `AbstractModel` con firma `ejecutar(entrada, sintonizador, informe)` | `models/filtros/` |
 | Proveedor generativo/embedding (interfaz + `fake` determinístico + `openai_compat`) | `services/proveedor.py` |
 | Validador y canonicalizador de JSON Schema (subconjunto) | `services/esquema.py` |
-| Tests de cardinalidades, procedencia, compuerta, ejecutor humano, monotonía | `tests/test_pipeline.py` |
+| El sumidero: proyección aplanada de los Resultados (`iag.resultado.fila`, vista SQL de sólo lectura) para las vistas pivot y graph nativas | `models/resultado_fila.py`, `views/tablero.xml` |
+| Tests de cardinalidades, procedencia, compuerta, ejecutor humano, monotonía, sintonizador de Normalización, tablero y ficha (27) | `tests/test_pipeline.py` |
 
-Menú: **Noticias ▸ Análisis IAG** (Estudios, Templates, Auditoría, Configuración).
+Menú: **Noticias ▸ Análisis IAG** (Estudios, Templates, Tablero, Auditoría, Configuración).
 Grupos: reutiliza `wsfnoticias.noticias_analista` (CRUD) y `wsfnoticias.noticias_operadores` (lectura).
 
 ## Entorno de desarrollo (Docker)
@@ -64,7 +65,21 @@ en el modelo, con sus datos. Antes de quitar un campo con datos, migrarlos (scri
    (`por_noticia` → M = N, `agregado` → M = 1), ejecutor de Verificación (`llm_judge` o `humano`), política de
    Normalización. Botones *Seleccionar corpus*, *Ejecutar siguiente filtro*, *Ejecutar todo*.
    Los *smart buttons* abren el recordset de cada tubo; la solapa *Resultado* muestra la consolidación;
-   *Corrida* guarda la configuración técnica, tiempos e informes de los filtros.
+   *Corrida* guarda la configuración técnica, tiempos e informes de los filtros; *Ficha* documenta el recorrido
+   (cada sintonizador con su valor, configuración técnica, cardinalidades y tiempos) a partir de lo persistido.
+5. **Normalización.** Además de la política sobre los observados y las claves a consolidar, el sintonizador admite
+   una **condición de inclusión** (una clave del esquema y el valor que debe tomar, p. ej. `es_sobre_narco = true`;
+   nada se suprime: el Resultado referencia los M veredictos y `contenido.filas` dice cuáles se tabularon) y, como
+   variable de comparación, la **variable del experto**: una tabla medio → valor (o departamento → valor) que el
+   corpus no trae y el experto define (*Poblar desde el corpus* crea una fila por medio). El Resultado trae, por
+   clave, el cruce contra esa variable con n y % por fila, la categoría dominante y la marca de clave concentrada
+   (> 70 %, o > 90 % / < 10 % en sí/no), V de Cramér, IC de Wilson para las claves sí/no y los veredictos por grupo.
+   Es determinístico: no interviene el modelo generativo; la lectura es del experto.
+6. **Tablero.** Botón *Tablero* en el Estudio o en el Resultado (o menú Análisis IAG ▸ Tablero): pivot con filas =
+   grupo y columnas = valor, y gráfico de barras apiladas, sobre una fila por análisis consolidado y por clave del
+   esquema, con el estado y la confianza del veredicto y las referencias al análisis y a la noticia. Se elige la
+   clave en el buscador; cualquier otro cruce (medio, semana, estado del veredicto) se arma desde *Agrupar por*.
+   Sólo existe para estudios consolidados: el sumidero cuelga del Resultado (puerto 14).
 4. **Ejecutor humano.** El Estudio queda `en_verificacion`; desde el *smart button* "Sin veredicto" se abre cada
    análisis y con *Emitir veredicto* se carga estado, confianza y sustento con la evidencia al lado. *Continuar* recoge
    los veredictos y sigue a Normalización.

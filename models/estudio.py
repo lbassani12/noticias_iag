@@ -116,8 +116,33 @@ class Estudio(models.Model):
                                             ('solo_validos', 'Sólo los válidos')],
                                            'Política sobre los observados', default='incluir', required=True)
     agrupar_por = fields.Selection([('ninguno', 'Sin agrupar'), ('medio', 'Medio'),
-                                    ('departamento', 'Departamento'), ('dia', 'Día'), ('semana', 'Semana (ISO)')],
-                                   'Agrupar por', default='medio', required=True)
+                                    ('departamento', 'Departamento'), ('dia', 'Día'), ('semana', 'Semana (ISO)'),
+                                    ('variable', 'Variable del experto')],
+                                   'Agrupar por', default='medio', required=True,
+                                   help='Variable de comparación contra la que se cruzan las claves consolidadas. '
+                                        '"Variable del experto": una agrupación que el corpus no trae y que el experto '
+                                        'define con la tabla de asignación (por ejemplo, medio → nacional / Rosario / interior).')
+    # Variable del experto: una tabla de asignación sobre una clave de procedencia de la noticia (medio o
+    # departamento). Es un dato del estudio (responsabilidades A y B): otro estudio puede agrupar los mismos
+    # portales de otra manera; por eso no vive en el medio de wsfnoticias.
+    variable_nombre = fields.Char('Nombre de la variable', default='grupo',
+                                  help='Cómo se llama la agrupación en el Resultado y en el tablero (p. ej. "grupo", "tipo de prensa").')
+    variable_dominio = fields.Selection([('medio', 'Medio'), ('departamento', 'Departamento')], 'Asignar según',
+                                        default='medio', required=True,
+                                        help='Clave de procedencia de la noticia sobre la que se define la variable.')
+    asignacion_ids = fields.One2many('iag.estudio.asignacion', 'estudio_id', 'Tabla de asignación', copy=True,
+                                     help='Una fila por medio (o departamento) con el valor de la variable que le corresponde. '
+                                          'Lo que no figure en la tabla se consolida como "(sin asignar)".')
+    n_sin_asignar = fields.Integer('Noticias sin asignar', compute='_compute_asignaciones')
+    # Condición de inclusión: un criterio de consolidación sobre una clave del esquema (p. ej. es_sobre_narco = true).
+    # No suprime nada: el Resultado sigue referenciando los M veredictos; sólo decide cuáles se tabulan.
+    condicion_clave_id = fields.Many2one('iag.estudio.clave', 'Consolidar sólo si la clave',
+                                         domain="[('estudio_id', '=', id)]", ondelete='set null',
+                                         help='Clave del esquema de respuesta que debe tomar el valor indicado para que el análisis '
+                                              'entre en la consolidación. Vacío: se consolidan todos los que admite la política.')
+    condicion_valor = fields.Char('vale',
+                                  help='Valor exigido, tal como figura en el esquema (para sí/no: true o false). '
+                                       'En listas alcanza con que un elemento coincida.')
     clave_ids = fields.One2many('iag.estudio.clave', 'estudio_id', 'Claves del esquema a consolidar', copy=True,
                                 help='Una fila por clave del esquema de respuesta del template; tildá las que Normalización '
                                      'debe tabular. Las de opciones cerradas dan distribuciones; las numéricas, mínimo, media y máximo.')
@@ -154,6 +179,9 @@ class Estudio(models.Model):
     config_tecnica_texto = fields.Text('Configuración técnica', compute='_compute_textos')
     tiempos_texto = fields.Text('Tiempos', compute='_compute_textos')
     informe_texto = fields.Text('Informe', compute='_compute_textos')
+    ficha_html = fields.Html('Ficha del estudio', compute='_compute_ficha', sanitize=False,
+                             help='Documentación del recorrido: cada sintonizador con su valor, la configuración técnica '
+                                  'de la corrida, las cardinalidades y los tiempos. El "por qué" de cada valor es del experto: Notas.')
 
     # ------------------------------------------------------------------------------------------
     @api.depends('noticia_ids', 'embedding_ids', 'prompt_ids', 'respuesta_ids', 'analisis_ids',
@@ -214,6 +242,112 @@ class Estudio(models.Model):
             rec.tiempos_texto = _json_texto(rec.tiempos)
             rec.informe_texto = _json_texto(rec.informe)
 
+    # --- Ficha: documentación del recorrido a partir de lo persistido -----------------------------
+    @api.depends('name', 'state', 'notas', 'iteracion_de_id', 'campo_fecha', 'fecha_desde', 'fecha_hasta', 'medio_ids',
+                 'regla_ids', 'excluir_archivadas', 'limite', 'fecha_corpus', 'noticia_ids', 'noticia_excluida_ids',
+                 'template_id', 'variable_ids.valor', 'texto_libre', 'temperatura', 'longitud_salida', 'estrategia',
+                 'top_k', 'umbral_similitud', 'criterio_validez', 'ejecutor', 'politica_observados', 'agrupar_por',
+                 'variable_nombre', 'variable_dominio', 'asignacion_ids.valor', 'condicion_clave_id', 'condicion_valor',
+                 'clave_ids.consolidar', 'embedding_ids', 'prompt_ids', 'respuesta_ids', 'analisis_ids', 'veredicto_ids',
+                 'resultado_id', 'config_tecnica_snapshot', 'tiempos', 'informe')
+    def _compute_ficha(self):
+        from markupsafe import escape as e
+        for rec in self:
+            rec.ficha_html = rec._ficha_html(e)
+
+    def _ficha_html(self, e):
+        self.ensure_one()
+
+        def tabla(filas):
+            cuerpo = ''.join('<tr><th style="width:32%%">%s</th><td>%s</td></tr>' % (e(k), v) for k, v in filas)
+            return '<table class="table table-sm table-bordered"><tbody>%s</tbody></table>' % cuerpo
+
+        def texto(v):
+            return e('' if v in (None, False) else str(v))
+
+        def fecha(v):
+            return e(fields.Datetime.context_timestamp(self, v).strftime('%d/%m/%Y %H:%M')) if v else '–'
+
+        partes = ['<h3>%s</h3>' % e(self.name)]
+        partes.append('<p><small class="text-muted">Estado: %s%s. Ficha generada desde el registro del estudio; '
+                      'las razones de cada valor van en Notas.</small></p>' % (
+                          e(dict(ESTADOS).get(self.state, self.state)),
+                          ('; iteración de "%s"' % e(self.iteracion_de_id.name)) if self.iteracion_de_id else ''))
+        # 1. Corpus
+        partes.append('<h4>1. Selección del corpus (sintonizador de Extracción sobre lo extraído)</h4>')
+        partes.append(tabla([
+            ('Reglas de extracción', texto(', '.join(self.regla_ids.mapped('nombre_regla')) or 'cualquiera')),
+            ('Fechas', '%s: %s → %s' % (e(dict(self._fields['campo_fecha'].selection).get(self.campo_fecha)),
+                                        fecha(self.fecha_desde), fecha(self.fecha_hasta))),
+            ('Medios', texto('%d seleccionados' % len(self.medio_ids) if self.medio_ids else 'todos')),
+            ('Excluir archivadas', 'sí' if self.excluir_archivadas else 'no'),
+            ('Límite', texto(self.limite or 'sin límite')),
+            ('Corpus confirmado', '%s; N = %d; excluidas a mano: %d' % (fecha(self.fecha_corpus), len(self.noticia_ids),
+                                                                       len(self.noticia_excluida_ids))),
+        ]))
+        # 2. Composición
+        variables = '; '.join('%s = %s' % (l.nombre, l.valor_efectivo) for l in self.variable_ids) or '–'
+        partes.append('<h4>2. Composición de contexto (sintonizador del experto)</h4>')
+        partes.append(tabla([
+            ('Template', texto(self.template_id.display_name)),
+            ('Variables de contexto', e(variables)),
+            ('Aclaraciones (texto libre)', texto(self.texto_libre or '–')),
+            ('Estrategia', e(dict(self._fields['estrategia'].selection).get(self.estrategia, ''))),
+            ('Top-k / umbral de similitud', '%s / %s' % (self.top_k or 'todas', ('%.4f' % self.umbral_similitud).replace('.', ',') if self.umbral_similitud else 'sin umbral')),
+            ('Temperatura / longitud de salida', '%s / %s' % (('%.2f' % self.temperatura).replace('.', ','), self.longitud_salida)),
+        ]))
+        # 3. Técnica
+        partes.append('<h4>3. Enriquecimiento, Invocación y Decodificación (configuración técnica de la corrida)</h4>')
+        snap = self.config_tecnica_snapshot or {}
+        partes.append(tabla([(k, texto(v)) for k, v in snap.items()]) if snap else '<p>Sin corrida todavía.</p>')
+        # 4. Verificación
+        partes.append('<h4>4. Verificación (sintonizador del experto)</h4>')
+        partes.append(tabla([
+            ('Ejecutor', e(dict(self._fields['ejecutor'].selection).get(self.ejecutor, ''))),
+            ('Criterio de validez', texto(self.criterio_validez)),
+        ]))
+        # 5. Normalización
+        filas = [('Política sobre los observados', e(dict(self._fields['politica_observados'].selection).get(self.politica_observados, ''))),
+                 ('Agrupar por', e(dict(self._fields['agrupar_por'].selection).get(self.agrupar_por, '')))]
+        if self.agrupar_por == 'variable':
+            por_valor = {}
+            for clave, valor in self._tabla_asignacion().items():
+                por_valor.setdefault(valor, []).append(clave)
+            detalle = '<br/>'.join('<b>%s</b>: %s' % (e(v), e('; '.join(sorted(ks)))) for v, ks in por_valor.items()) or '–'
+            filas.append(('Variable del experto', '%s (según %s); sin asignar: %d noticias<br/>%s' % (
+                e(self.variable_nombre or 'grupo'), e(self.variable_dominio), self.n_sin_asignar, detalle)))
+        if self.condicion_clave_id and (self.condicion_valor or '').strip():
+            filas.append(('Condición de inclusión', '%s = %s' % (e(self.condicion_clave_id.nombre), e(self.condicion_valor.strip()))))
+        filas.append(('Claves consolidadas', e(', '.join(self._claves_a_consolidar()) or '–')))
+        partes.append('<h4>5. Normalización (sintonizador del experto)</h4>')
+        partes.append(tabla(filas))
+        # 6. Cardinalidades y tiempos
+        tiempos = self.tiempos or {}
+        embudo = [('Noticia[N]', len(self.noticia_ids), ''), ('Embedding[N]', len(self.embedding_ids), 'enriquecimiento'),
+                  ('Prompt[M]', len(self.prompt_ids), 'composicion'), ('RespuestaIAG[M]', len(self.respuesta_ids), 'invocacion'),
+                  ('Análisis[M′]', len(self.analisis_ids), 'decodificacion'), ('Veredicto[M′]', len(self.veredicto_ids), 'verificacion'),
+                  ('Resultado', 1 if self.resultado_id else 0, 'normalizacion')]
+        cuerpo = ''.join('<tr><td>%s</td><td class="text-end">%s</td><td class="text-end">%s</td></tr>' % (
+            e(t), n, ('%.1f' % tiempos[f]).replace('.', ',') if f in tiempos else '–') for t, n, f in embudo)
+        partes.append('<h4>6. Cardinalidades y tiempos por filtro</h4>')
+        partes.append('<table class="table table-sm table-bordered w-auto"><thead><tr><th>Tubo</th><th class="text-end">n</th>'
+                      '<th class="text-end">segundos</th></tr></thead><tbody>%s</tbody></table>' % cuerpo)
+        informe = self.informe or {}
+        avisos = []
+        for filtro, det in informe.items():
+            if not isinstance(det, dict):
+                continue
+            for k in ('descartes', 'fallidas', 'reparados'):
+                if det.get(k):
+                    avisos.append('%s: %d %s' % (filtro, len(det[k]), k))
+            if det.get('juez_sin_respuesta'):
+                avisos.append('%s: %s juicios sin respuesta' % (filtro, det['juez_sin_respuesta']))
+        if avisos:
+            partes.append('<p>Incidencias registradas por los filtros: %s.</p>' % e('; '.join(avisos)))
+        if self.notas:
+            partes.append('<h4>Notas del experto</h4><p>%s</p>' % str(e(self.notas)).replace('\n', '<br/>'))
+        return ''.join(partes)
+
     # --- Variables de contexto: el template las declara, el Estudio les asigna valor -----------
     def _valores_variables(self):
         self.ensure_one()
@@ -261,8 +395,10 @@ class Estudio(models.Model):
         for rec in self:
             previas = {c.nombre: c.consolidar for c in rec.clave_ids}
             comandos = [(5, 0, 0)]
-            props = (rec.template_id.esquema_respuesta or {}).get('properties') or {}
-            for i, (nombre, sub) in enumerate(props.items()):
+            esquema = rec.template_id.esquema_respuesta or {}
+            props = esquema.get('properties') or {}
+            for i, nombre in enumerate(self.env['iag.template']._orden_claves(esquema)):
+                sub = props.get(nombre)
                 sub = sub if isinstance(sub, dict) else {}
                 if marcadas is not None:
                     consolidar = nombre in marcadas
@@ -320,12 +456,69 @@ class Estudio(models.Model):
         if filtro == 'verificacion':
             return {'criterio_validez': self.criterio_validez or '', 'ejecutor': self.ejecutor}
         if filtro == 'normalizacion':
-            return {
+            sint = {
                 'politica_observados': self.politica_observados,
                 'agrupar_por': self.agrupar_por,
                 'claves_comparacion': self._claves_a_consolidar(),
             }
+            if self.agrupar_por == 'variable':
+                sint['variable'] = {
+                    'nombre': (self.variable_nombre or '').strip() or 'grupo',
+                    'dominio': self.variable_dominio,
+                    'asignacion': self._tabla_asignacion(),
+                }
+            if self.condicion_clave_id and (self.condicion_valor or '').strip():
+                sint['condicion'] = {'clave': self.condicion_clave_id.nombre, 'valor': self.condicion_valor.strip()}
+            return sint
         return {}
+
+    # --- Variable del experto (sintonizador de Normalización) --------------------------------------
+    def _clave_asignacion(self, noticia):
+        """Valor de la clave de procedencia de la noticia sobre la que se define la variable."""
+        self.ensure_one()
+        if self.variable_dominio == 'departamento':
+            return (noticia.departamento or '').strip()
+        return noticia.medio.name or ''
+
+    def _tabla_asignacion(self):
+        """{clave de procedencia: valor de la variable}, tal como la cargó el experto."""
+        self.ensure_one()
+        tabla = {}
+        for a in self.asignacion_ids:
+            clave = a.departamento if self.variable_dominio == 'departamento' else a.medio_id.name
+            if clave and (a.valor or '').strip():
+                tabla[clave.strip()] = a.valor.strip()
+        return tabla
+
+    @api.depends('asignacion_ids.valor', 'asignacion_ids.medio_id', 'asignacion_ids.departamento',
+                 'variable_dominio', 'noticia_ids', 'agrupar_por')
+    def _compute_asignaciones(self):
+        for rec in self:
+            if rec.agrupar_por != 'variable':
+                rec.n_sin_asignar = 0
+                continue
+            tabla = rec._tabla_asignacion()
+            rec.n_sin_asignar = len(rec.noticia_ids.filtered(lambda n: rec._clave_asignacion(n) not in tabla))
+
+    def action_poblar_asignaciones(self):
+        """Una fila por medio (o departamento) presente en el corpus, sin valor, conservando lo ya cargado."""
+        for rec in self:
+            if rec.state == 'consolidado':
+                raise UserError(_('El estudio ya está consolidado.'))
+            noticias = rec.noticia_ids or rec._buscar_candidatas()
+            existentes = {(a.medio_id.id, (a.departamento or '').strip()) for a in rec.asignacion_ids}
+            comandos = []
+            if rec.variable_dominio == 'departamento':
+                for dep in sorted({(n.departamento or '').strip() for n in noticias if (n.departamento or '').strip()}):
+                    if (False, dep) not in existentes:
+                        comandos.append((0, 0, {'departamento': dep}))
+            else:
+                for medio in noticias.mapped('medio').sorted('name'):
+                    if (medio.id, '') not in existentes:
+                        comandos.append((0, 0, {'medio_id': medio.id}))
+            if comandos:
+                rec.asignacion_ids = comandos
+        return True
 
     # --- Corpus (sintonizador de Extracción: selección sobre lo que wsfnoticias extrajo) ------
     def _dominio_corpus(self):
@@ -508,6 +701,12 @@ class Estudio(models.Model):
         return {'type': 'ir.actions.act_window', 'name': _('Resultado'), 'res_model': 'iag.resultado',
                 'res_id': self.resultado_id.id, 'view_mode': 'form', 'target': 'current'}
 
+    def action_ver_tablero(self):
+        self.ensure_one()
+        if not self.resultado_id:
+            raise UserError(_('El tablero se construye sobre el Resultado: el estudio todavía no está consolidado.'))
+        return self.resultado_id.action_ver_tablero()
+
 
 class EstudioVariable(models.Model):
     """Una fila por variable de contexto declarada por el template del Estudio. La declaración
@@ -567,9 +766,45 @@ class EstudioClave(models.Model):
             if vals.get('nombre') or not vals.get('estudio_id'):
                 continue
             estudio = self.env['iag.estudio'].browse(vals['estudio_id'])
-            props = list(((estudio.template_id.esquema_respuesta or {}).get('properties') or {}).items())
+            esquema = estudio.template_id.esquema_respuesta or {}
+            nombres = self.env['iag.template']._orden_claves(esquema)
             idx = vals.get('sequence', 0) or 0
-            if 0 <= idx < len(props):
-                nombre, sub = props[idx]
+            if 0 <= idx < len(nombres):
+                nombre = nombres[idx]
+                sub = (esquema.get('properties') or {}).get(nombre)
                 vals.update({'nombre': nombre, 'tipo': estudio._describir_clave(sub if isinstance(sub, dict) else {})})
         return super().create(vals_list)
+
+
+class EstudioAsignacion(models.Model):
+    """Una fila de la tabla de asignación de la variable del experto: un medio (o un departamento) y el valor
+    de la variable que le corresponde en este estudio. Es configuración del sintonizador de Normalización, no un
+    tipo del flujo: se copia con la iteración y queda materializada en el contenido del Resultado."""
+    _name = 'iag.estudio.asignacion'
+    _description = 'Asignación de la variable del experto'
+    _order = 'sequence, id'
+
+    estudio_id = fields.Many2one('iag.estudio', required=True, ondelete='cascade', index=True)
+    sequence = fields.Integer(default=0)
+    variable_dominio = fields.Selection(related='estudio_id.variable_dominio')
+    medio_id = fields.Many2one('res.partner', 'Medio', ondelete='restrict')
+    departamento = fields.Char('Departamento')
+    valor = fields.Char('Valor de la variable', help='Vacío: el medio queda "(sin asignar)".')
+    n_noticias = fields.Integer('Noticias en el corpus', compute='_compute_n_noticias')
+
+    @api.depends('medio_id', 'departamento', 'estudio_id.noticia_ids', 'estudio_id.variable_dominio')
+    def _compute_n_noticias(self):
+        for rec in self:
+            noticias = rec.estudio_id.noticia_ids
+            if rec.estudio_id.variable_dominio == 'departamento':
+                dep = (rec.departamento or '').strip()
+                rec.n_noticias = len(noticias.filtered(lambda n: (n.departamento or '').strip() == dep)) if dep else 0
+            else:
+                rec.n_noticias = len(noticias.filtered(lambda n: n.medio == rec.medio_id)) if rec.medio_id else 0
+
+    def name_get(self):
+        res = []
+        for rec in self:
+            clave = rec.departamento if rec.estudio_id.variable_dominio == 'departamento' else rec.medio_id.name
+            res.append((rec.id, '%s → %s' % (clave or '?', rec.valor or '(sin asignar)')))
+        return res

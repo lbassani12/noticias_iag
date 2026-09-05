@@ -3,6 +3,7 @@
   <menuitem id="menu_iag_root" name="Análisis IAG" parent="wsfnoticias.wsf_noticias_root" sequence="50"/>
   <menuitem id="menu_iag_estudios" name="Estudios" parent="menu_iag_root" action="action_iag_estudio" sequence="10"/>
   <menuitem id="menu_iag_templates" name="Templates" parent="menu_iag_root" action="action_iag_template" sequence="20"/>
+  <menuitem id="menu_iag_tablero" name="Tablero" parent="menu_iag_root" action="action_iag_tablero" sequence="25"/>
   <menuitem id="menu_iag_auditoria" name="Auditoría" parent="menu_iag_root" sequence="30"/>
   <menuitem id="menu_iag_embeddings" name="Embeddings" parent="menu_iag_auditoria" action="action_iag_embedding" sequence="10"/>
   <menuitem id="menu_iag_prompts" name="Prompts" parent="menu_iag_auditoria" action="action_iag_prompt" sequence="20"/>

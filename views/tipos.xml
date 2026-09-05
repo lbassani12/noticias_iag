@@ -216,6 +216,9 @@
     <field name="model">iag.resultado</field>
     <field name="arch" type="xml">
       <form create="0" edit="0" delete="0">
+        <header>
+          <button name="action_ver_tablero" string="Tablero (pivot y gráfico)" type="object" class="btn-primary"/>
+        </header>
         <sheet>
           <group>
             <field name="n_veredictos"/>

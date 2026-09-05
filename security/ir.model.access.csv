@@ -28,3 +28,9 @@ access_iag_veredicto_sustento_system,iag.veredicto.sustento system,model_iag_ver
 access_iag_estudio_clave_analista,iag.estudio.clave analista,model_iag_estudio_clave,wsfnoticias.noticias_analista,1,1,1,1
 access_iag_estudio_clave_operador,iag.estudio.clave operador,model_iag_estudio_clave,wsfnoticias.noticias_operadores,1,0,0,0
 access_iag_estudio_clave_system,iag.estudio.clave system,model_iag_estudio_clave,base.group_system,1,1,1,1
+access_iag_estudio_asignacion_analista,iag.estudio.asignacion analista,model_iag_estudio_asignacion,wsfnoticias.noticias_analista,1,1,1,1
+access_iag_estudio_asignacion_operador,iag.estudio.asignacion operador,model_iag_estudio_asignacion,wsfnoticias.noticias_operadores,1,0,0,0
+access_iag_estudio_asignacion_system,iag.estudio.asignacion system,model_iag_estudio_asignacion,base.group_system,1,1,1,1
+access_iag_resultado_fila_analista,iag.resultado.fila analista,model_iag_resultado_fila,wsfnoticias.noticias_analista,1,0,0,0
+access_iag_resultado_fila_operador,iag.resultado.fila operador,model_iag_resultado_fila,wsfnoticias.noticias_operadores,1,0,0,0
+access_iag_resultado_fila_system,iag.resultado.fila system,model_iag_resultado_fila,base.group_system,1,0,0,0

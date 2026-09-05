@@ -34,6 +34,16 @@ class Template(models.Model):
 
     RE_VARIABLE = re.compile(r'\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}')
 
+    @api.model
+    def _orden_claves(self, esquema):
+        """Orden de presentación de las claves del esquema de respuesta. El campo Json se persiste como jsonb, que
+        reordena las claves de un objeto (por longitud y alfabeto); la lista ``required`` es un arreglo y conserva
+        el orden del autor, así que manda ella y después van las claves que no figuran en ella."""
+        esquema = esquema or {}
+        props = list((esquema.get('properties') or {}).keys())
+        req = [k for k in (esquema.get('required') or []) if k in props]
+        return req + [k for k in props if k not in req]
+
     name = fields.Char('Nombre', required=True)
     objetivo = fields.Text('Objetivo del análisis', required=True,
                            help='Alcance, paradigma de análisis y referencias a tener en cuenta.')

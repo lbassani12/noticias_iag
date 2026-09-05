@@ -54,8 +54,11 @@
             <button name="action_ver_veredictos" type="object" class="oe_stat_button" icon="fa-check-square-o">
               <field name="m_veredictos" widget="statinfo" string="Veredictos"/>
             </button>
-            <button name="action_ver_resultado" type="object" class="oe_stat_button" icon="fa-bar-chart" attrs="{'invisible': [('resultado_id', '=', False)]}">
+            <button name="action_ver_resultado" type="object" class="oe_stat_button" icon="fa-table" attrs="{'invisible': [('resultado_id', '=', False)]}">
               <div class="o_stat_info"><span class="o_stat_text">Resultado</span></div>
+            </button>
+            <button name="action_ver_tablero" type="object" class="oe_stat_button" icon="fa-bar-chart" attrs="{'invisible': [('resultado_id', '=', False)]}">
+              <div class="o_stat_info"><span class="o_stat_text">Tablero</span></div>
             </button>
           </div>
           <div class="oe_title">
@@ -146,9 +149,38 @@
             </page>
             <page string="Normalización" name="normalizacion">
               <group>
-                <field name="politica_observados" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
-                <field name="agrupar_por" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                <group>
+                  <field name="politica_observados" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                  <field name="agrupar_por" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                </group>
+                <group string="Condición de inclusión">
+                  <field name="condicion_clave_id" options="{'no_create': True, 'no_open': True}" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                  <field name="condicion_valor" attrs="{'readonly': [('state', '=', 'consolidado')], 'required': [('condicion_clave_id', '!=', False)]}"/>
+                </group>
               </group>
+              <div attrs="{'invisible': [('agrupar_por', '!=', 'variable')]}">
+                <separator string="Variable del experto"/>
+                <p class="text-muted">La variable de comparación no está en el corpus: la definís vos. Cada medio (o departamento) del corpus recibe un valor; en el Resultado y en el tablero las claves se cruzan contra ese valor. Lo que no tenga valor se consolida como "(sin asignar)".</p>
+                <group>
+                  <group>
+                    <field name="variable_nombre" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                    <field name="variable_dominio" attrs="{'readonly': [('state', '=', 'consolidado')]}"/>
+                  </group>
+                  <group>
+                    <field name="n_sin_asignar"/>
+                  </group>
+                </group>
+                <button name="action_poblar_asignaciones" string="Poblar desde el corpus" type="object" class="btn-secondary mb-2" attrs="{'invisible': [('state', '=', 'consolidado')]}" help="Agrega una fila por medio (o departamento) presente en el corpus, sin valor; conserva las que ya tengan valor."/>
+                <field name="asignacion_ids" nolabel="1" attrs="{'readonly': [('state', '=', 'consolidado')]}">
+                  <tree editable="bottom">
+                    <field name="sequence" widget="handle"/>
+                    <field name="medio_id" attrs="{'column_invisible': [('parent.variable_dominio', '=', 'departamento')], 'required': [('parent.variable_dominio', '!=', 'departamento')]}" options="{'no_create': True}"/>
+                    <field name="departamento" attrs="{'column_invisible': [('parent.variable_dominio', '!=', 'departamento')], 'required': [('parent.variable_dominio', '=', 'departamento')]}"/>
+                    <field name="valor"/>
+                    <field name="n_noticias"/>
+                  </tree>
+                </field>
+              </div>
               <separator string="Claves del esquema a consolidar"/>
               <p class="text-muted">Una fila por clave del esquema de respuesta del template. Las tildadas se tabulan en el Resultado: las de opciones cerradas y sí/no como distribuciones, las numéricas con mínimo, media y máximo, y todas cruzadas por la agrupación elegida. Los textos libres y las listas no se tildan por defecto porque cada valor sería único.</p>
               <field name="clave_ids" nolabel="1" attrs="{'readonly': [('state', '=', 'consolidado')]}">
@@ -169,6 +201,9 @@
                 <field name="tiempos_texto" style="font-family: monospace"/>
                 <field name="informe_texto" style="font-family: monospace"/>
               </group>
+            </page>
+            <page string="Ficha" name="ficha">
+              <field name="ficha_html" nolabel="1" readonly="1"/>
             </page>
             <page string="Notas" name="notas">
               <field name="notas" nolabel="1"/>
