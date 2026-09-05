@@ -69,9 +69,3 @@ Cargado el corpus, un Estudio lo recorta con los criterios de la solapa Corpus (
   medio → grupo usada en la tesina se declara en cada Estudio como variable del experto.
 - `Tipo` (TextBlob sobre texto traducido) no distingue la valencia de una noticia de violencia; en el caso
   de aplicación su acuerdo con la codificación del modelo fue nulo.
-
-## Derechos
-
-Los textos son noticias publicadas por los portales que figuran en `Medio`, recopiladas por el scraper
-institucional con fines de investigación. Se incluyen aquí únicamente para la evaluación académica de la
-tesina y la reproducción de sus resultados; los derechos sobre cada texto pertenecen a su portal.
