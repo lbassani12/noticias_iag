@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import re
+import time
 
 import requests
 
@@ -168,22 +169,34 @@ class ProveedorOpenAICompat(models.AbstractModel):
     _inherit = 'iag.proveedor'
     _description = 'Proveedor por API compatible con OpenAI'
 
+    #: Reintentos ante fallas transitorias (red, timeout, HTTP 5xx). Los 4xx no se reintentan.
+    REINTENTOS = 3
+
     def _post(self, ruta, payload):
         cfg = self._config()
         headers = {'Content-Type': 'application/json'}
         if cfg['api_key']:
             headers['Authorization'] = 'Bearer %s' % cfg['api_key']
         url = cfg['base_url'].rstrip('/') + ruta
-        try:
-            r = requests.post(url, json=payload, headers=headers, timeout=cfg['timeout'])
-        except requests.RequestException as e:
-            raise _ErrorHTTP(None, '%s: %s' % (url, e))
-        if r.status_code >= 400:
-            raise _ErrorHTTP(r.status_code, '%s -> HTTP %d: %s' % (url, r.status_code, r.text[:300]))
-        try:
-            return r.json()
-        except ValueError as e:
-            raise _ErrorHTTP(r.status_code, '%s: respuesta no JSON (%s)' % (url, e))
+        ultimo = None
+        for intento in range(1, self.REINTENTOS + 1):
+            try:
+                r = requests.post(url, json=payload, headers=headers, timeout=cfg['timeout'])
+            except requests.RequestException as e:
+                ultimo = _ErrorHTTP(None, '%s: %s' % (url, e))
+            else:
+                if r.status_code < 500:
+                    if r.status_code >= 400:
+                        raise _ErrorHTTP(r.status_code, '%s -> HTTP %d: %s' % (url, r.status_code, r.text[:300]))
+                    try:
+                        return r.json()
+                    except ValueError as e:
+                        raise _ErrorHTTP(r.status_code, '%s: respuesta no JSON (%s)' % (url, e))
+                ultimo = _ErrorHTTP(r.status_code, '%s -> HTTP %d: %s' % (url, r.status_code, r.text[:300]))
+            if intento < self.REINTENTOS:
+                _logger.warning('Proveedor: intento %d/%d falló (%s); se reintenta.', intento, self.REINTENTOS, ultimo.detalle)
+                time.sleep(2 * intento)
+        raise ultimo
 
     def embeber(self, textos):
         cfg = self._config()

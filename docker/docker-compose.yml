@@ -29,7 +29,7 @@ services:
       - ../../wsfnoticias:/mnt/extra-addons/wsfnoticias   # rw: escribe medio.log y telegram_norep.db en su carpeta
       - ../:/mnt/extra-addons/noticias_iag
     command: ["odoo", "--dev=reload,qweb,xml"]
-    # host.docker.internal apunta al host de Docker (p. ej. un Ollama instalado nativo en WSL)
+    # host.docker.internal apunta al host de Docker: el Ollama nativo de Windows, que usa la GPU AMD por Vulkan
     # api.telegram.org -> loopback: wsfnoticias manda cada noticia grabada al grupo
     # institucional con el token hardcodeado del repo base, incluso si la regla no
     # tiene Telegram configurado (fun_enviar_telegrama usa el chat por defecto).
@@ -38,8 +38,15 @@ services:
       - "host.docker.internal:host-gateway"
       - "api.telegram.org:127.0.0.1"
 
-  # Modelos locales para desarrollo sin costo. Desde el contenedor de Odoo: http://ollama:11434/v1
+  # Ollama en contenedor, solo CPU: la GPU AMD (RX 6500M) no es accesible desde WSL ni Docker.
+  # El Ollama nativo de Windows con GPU (Vulkan), alcanzable como http://host.docker.internal:11434/v1,
+  # se probó el 2026-09-03 y se descartó el 2026-09-04 (la máquina se apagaba bajo carga). El servicio
+  # queda bajo un profile para que `docker compose up` no lo levante solo y no choque en el puerto 11434
+  # si la app de Windows está corriendo. Configuración vigente:
+  #   docker compose --profile docker-ollama up -d ollama
+  # y noticias_iag.base_url = http://ollama:11434/v1.
   ollama:
+    profiles: ["docker-ollama"]
     image: ollama/ollama:latest
     volumes:
       - ollama-data:/root/.ollama

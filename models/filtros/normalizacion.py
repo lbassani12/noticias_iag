@@ -99,7 +99,12 @@ class FiltroNormalizacion(models.AbstractModel):
             return n.medio.name or '(sin medio)'
         if agrupar == 'departamento':
             return n.departamento or '(sin departamento)'
-        if agrupar == 'dia':
+        if agrupar in ('dia', 'semana'):
             fecha = n.fecha_hora or n.fecha_registro
-            return fecha.strftime('%Y-%m-%d') if fecha else '(sin fecha)'
+            if not fecha:
+                return '(sin fecha)'
+            if agrupar == 'dia':
+                return fecha.strftime('%Y-%m-%d')
+            iso = fecha.isocalendar()
+            return '%d-S%02d' % (iso[0], iso[1])
         return '(todos)'

@@ -116,7 +116,7 @@ class Estudio(models.Model):
                                             ('solo_validos', 'Sólo los válidos')],
                                            'Política sobre los observados', default='incluir', required=True)
     agrupar_por = fields.Selection([('ninguno', 'Sin agrupar'), ('medio', 'Medio'),
-                                    ('departamento', 'Departamento'), ('dia', 'Día')],
+                                    ('departamento', 'Departamento'), ('dia', 'Día'), ('semana', 'Semana (ISO)')],
                                    'Agrupar por', default='medio', required=True)
     clave_ids = fields.One2many('iag.estudio.clave', 'estudio_id', 'Claves del esquema a consolidar', copy=True,
                                 help='Una fila por clave del esquema de respuesta del template; tildá las que Normalización '

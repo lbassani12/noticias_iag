@@ -437,3 +437,48 @@ class TestPipeline(TransactionCase):
         # la iteración copia las filas con sus tildes
         nuevo = self.env['iag.estudio'].browse(est.action_nueva_iteracion()['res_id'])
         self.assertEqual(nuevo.clave_ids.filtered('consolidar').mapped('nombre'), est.clave_ids.filtered('consolidar').mapped('nombre'))
+
+    # --- Semana en Normalización; tolerancia a fallas del proveedor ---------------------------
+    def test_21_agrupar_por_semana(self):
+        est = self._estudio(agrupar_por='semana')
+        est.action_ejecutar_todo()
+        grupos = set(est.resultado_id.contenido['por_grupo'])
+        self.assertTrue(grupos)
+        for g in grupos:
+            self.assertRegex(g, r'^\d{4}-S\d{2}$')
+        semanas = {'%d-S%02d' % (n.fecha_hora.isocalendar()[0], n.fecha_hora.isocalendar()[1]) for n in self.noticias}
+        self.assertEqual(grupos, semanas)
+
+    def test_22_falla_del_proveedor_no_pierde_la_etapa(self):
+        from unittest.mock import patch
+        Fake = self.registry['iag.proveedor.fake']
+        original = Fake.completar
+
+        def completar_fallando(proveedor, texto, temperatura, longitud, esquema=None):
+            if 'El intendente anunció obras' in texto:      # una sola noticia falla, el resto responde
+                raise UserError('Error del proveedor generativo: simulado')
+            return original(proveedor, texto, temperatura, longitud, esquema=esquema)
+
+        est = self._estudio()
+        with patch.object(Fake, 'completar', completar_fallando), mute_logger('odoo.addons.noticias_iag.models.filtros.invocacion'):
+            self._hasta(est, 'decodificado')
+        self.assertEqual(len(est.respuesta_ids), self.N)                       # M respuestas, una vacía
+        vacias = est.respuesta_ids.filtered(lambda r: not r.texto)
+        self.assertEqual(len(vacias), 1)
+        self.assertEqual(len(est.informe['invocacion']['fallidas']), 1)
+        self.assertEqual(est.informe['invocacion']['fallidas'][0]['prompt_id'], vacias.prompt_id.id)
+        self.assertIn('simulado', est.informe['invocacion']['fallidas'][0]['motivo'])
+        self.assertEqual(len(est.analisis_ids), self.N - 1)                    # la compuerta descarta la vacía
+        self.assertEqual(est.informe['decodificacion']['descartes'][0]['motivo'], 'respuesta vacía')
+        # el juez tampoco pierde la etapa: el análisis sin juicio queda observado con confianza 0
+        with patch.object(Fake, 'completar', completar_fallando), mute_logger('odoo.addons.noticias_iag.models.filtros.verificacion'):
+            self._hasta(est, 'consolidado')
+        self.assertEqual(len(est.veredicto_ids), self.N - 1)
+        self.assertEqual(est.informe['verificacion']['juez_sin_respuesta'], 0)   # esa noticia ya no llega al juez
+        est2 = self._estudio(limite=2)
+        with patch.object(Fake, 'completar', lambda *a, **k: (_ for _ in ()).throw(UserError('caído'))), \
+                mute_logger('odoo.addons.noticias_iag.models.filtros.invocacion', 'odoo.addons.noticias_iag.models.filtros.verificacion'):
+            self._hasta(est2, 'decodificado')
+        self.assertEqual(est2.state, 'decodificado')
+        self.assertEqual(len(est2.analisis_ids), 0)
+        self.assertEqual(len(est2.informe['invocacion']['fallidas']), 2)

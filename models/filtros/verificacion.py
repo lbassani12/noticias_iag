@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
 import json
+import logging
 
 from odoo import models
+from odoo.exceptions import UserError
 
 from ...services import esquema as esq
 from ...services.proveedor import MARCADOR_ESQUEMA
+
+_logger = logging.getLogger(__name__)
 
 #: Esquema del juicio que emite el juez generativo (contrato Veredicto: estado, confianza, sustento).
 ESQUEMA_VEREDICTO = {
@@ -32,8 +36,9 @@ class FiltroVerificacion(models.AbstractModel):
     Ejecutor ``llm_judge``: un prompt de juez por análisis con la evidencia (las noticias que
     su prompt incorporó) y el criterio de validez. Ejecutor ``humano``: el filtro no crea
     registros; el revisor los emite desde la vista y el Estudio queda ``en_verificacion``.
-    Si el juez no produce un veredicto conforme, se registra ``observado`` con confianza 0
-    y el motivo en el sustento: ningún análisis queda sin veredicto.
+    Si el juez no produce un veredicto conforme (o el proveedor no responde pese a los
+    reintentos), se registra ``observado`` con confianza 0 y el motivo en el sustento: ningún
+    análisis queda sin veredicto y la etapa no se pierde por una llamada fallida.
     """
     _name = 'iag.filtro.verificacion'
     _inherit = 'iag.filtro'
@@ -45,12 +50,17 @@ class FiltroVerificacion(models.AbstractModel):
             return Veredicto
         cfg = self._config()
         proveedor = self._proveedor()
-        vals, no_conformes = [], 0
+        vals, no_conformes, sin_respuesta = [], 0, 0
         for analisis in entrada:
             prompt_juez = self._prompt_juez(analisis, sintonizador.get('criterio_validez') or '',
                                             cfg['max_chars_noticia'])
-            crudo = proveedor.completar(prompt_juez, 0.0, 2048, esquema=ESQUEMA_VEREDICTO)
-            obj, error = esq.aislar_json(crudo or '')
+            try:
+                crudo = proveedor.completar(prompt_juez, 0.0, 2048, esquema=ESQUEMA_VEREDICTO)
+                obj, error = esq.aislar_json(crudo or '')
+            except UserError as e:
+                sin_respuesta += 1
+                crudo, obj, error = '', None, 'el proveedor no respondió: %s' % (e.args[0] if e.args else e)
+                _logger.error('Verificación: análisis %d sin juicio del proveedor (%s)', analisis.id, error)
             canon, errores = (None, [error]) if error else esq.canonicalizar(obj, ESQUEMA_VEREDICTO)
             if errores:
                 no_conformes += 1
@@ -61,6 +71,7 @@ class FiltroVerificacion(models.AbstractModel):
                          'confianza': canon['confianza'], 'sustento': canon['sustento']})
         if informe is not None:
             informe['juez_no_conforme'] = no_conformes
+            informe['juez_sin_respuesta'] = sin_respuesta
         return Veredicto.create(vals)
 
     @staticmethod
